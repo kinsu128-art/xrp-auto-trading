@@ -88,7 +88,17 @@ docker compose run --rm trading-bot --mode backtest --days 365
 docker compose up -d --build
 ```
 
-컨테이너가 백그라운드에서 실행되며, 6시간 봉 마감마다 자동 매매를 수행합니다.
+컨테이너가 백그라운드에서 실행됩니다. 텔레그램으로 봇 상태를 확인하고 제어할 수 있습니다:
+
+| 명령어 | 기능 |
+|---|---|
+| `/start` | 매매 재개 |
+| `/stop` | 매매 일시중지 (봇 프로세스는 유지) |
+| `/status` | 봇 상태, 포지션, 잔고, 마지막 캔들 조회 |
+| `/balance` | 빗썸에서 실시간 잔고 조회 |
+| `/help` | 사용 가능한 명령어 목록 |
+
+> `/stop`은 매매만 일시중지하며 봇 프로세스와 텔레그램 수신은 유지됩니다. `/start`로 언제든 재개할 수 있습니다.
 
 ---
 
@@ -143,12 +153,14 @@ docker compose run --rm trading-bot --mode collect --days 365
 # 백테스트
 docker compose run --rm trading-bot --mode backtest --days 365
 
-# 컨테이너 중지
+# 컨테이너 중지 (프로세스 완전 종료)
 docker compose down
 
 # 컨테이너 재시작
 docker compose restart
 ```
+
+> 실행 중 매매를 일시중지하려면 텔레그램에서 `/stop`을 보내세요. 컨테이너를 내릴 필요 없이 `/start`로 재개할 수 있습니다.
 
 ### Docker 단독 실행
 
