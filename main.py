@@ -458,6 +458,11 @@ def main():
         default=365,
         help="백테스트 기간 (일)"
     )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="실전 모드 확인 프롬프트 생략 (Docker 환경용)"
+    )
 
     args = parser.parse_args()
 
@@ -483,10 +488,12 @@ def main():
         print("🚀 실전 모드")
         print("⚠️  실전 모드에서는 실제 자산이 거래됩니다!")
         print("⚠️  소액으로 테스트 후 본격 운용을 권장합니다.")
-        confirm = input("계속 진행하시겠습니까? (yes/no): ")
-        if confirm.lower() not in ["yes", "y"]:
-            print("❌ 취소되었습니다.")
-            return
+
+        if not args.confirm:
+            confirm = input("계속 진행하시겠습니까? (yes/no): ")
+            if confirm.lower() not in ["yes", "y"]:
+                print("❌ 취소되었습니다.")
+                return
 
         bot.run_live()
 

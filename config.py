@@ -34,14 +34,14 @@ class Config:
     ERROR_LOG_FILE = os.getenv("ERROR_LOG_FILE", "logs/error.log")
 
     # API 설정
-    BITHUMB_API_URL = "https://api.bithumb.com"
+    BITHUMB_API_URL = os.getenv("BITHUMB_API_URL", "https://api.bithumb.com")
 
     # 재시도 설정
-    MAX_RETRIES = 3
-    RETRY_DELAY = 1  # 초
+    MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+    RETRY_DELAY = int(os.getenv("RETRY_DELAY", "1"))  # 초
 
     # 데이터베이스 설정
-    DATABASE_PATH = "data/candles.db"
+    DATABASE_PATH = os.getenv("DATABASE_PATH", "data/candles.db")
 
 
 # 설정 유효성 검사

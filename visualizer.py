@@ -1,14 +1,32 @@
 """
 시각화 모듈
 """
+import sys
+import matplotlib
+matplotlib.use('Agg')  # 헤드리스 백엔드 (GUI 불필요)
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.font_manager as fm
 from datetime import datetime
 from typing import List, Dict, Optional
 import pandas as pd
 
-# 한글 폰트 설정 (Windows)
-plt.rcParams['font.family'] = 'Malgun Gothic'
+# 한글 폰트 설정 (OS별 자동 감지)
+def _setup_korean_font():
+    """OS에 맞는 한글 폰트를 설정"""
+    if sys.platform == "win32":
+        candidates = ['Malgun Gothic', 'NanumGothic', 'NanumBarunGothic']
+    else:
+        # Linux/Docker: Nanum 폰트 (apt install fonts-nanum)
+        candidates = ['NanumGothic', 'NanumBarunGothic', 'DejaVu Sans']
+
+    available = {f.name for f in fm.fontManager.ttflist}
+    for font in candidates:
+        if font in available:
+            plt.rcParams['font.family'] = font
+            break
+
+_setup_korean_font()
 plt.rcParams['axes.unicode_minus'] = False
 
 

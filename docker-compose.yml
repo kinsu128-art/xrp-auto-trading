@@ -1,0 +1,22 @@
+services:
+  trading-bot:
+    build: .
+    container_name: xrp-trading-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Seoul
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+    # 기본: 실전 모드
+    # command: ["--mode", "live", "--confirm"]
+
+    # 데이터 수집만 실행하려면:
+    # command: ["--mode", "collect", "--days", "365"]
+
+    # 백테스트만 실행하려면:
+    # command: ["--mode", "backtest", "--days", "365"]
