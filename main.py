@@ -102,7 +102,8 @@ class TradingBot:
         self.visualizer = Visualizer()
 
         # 상태 플래그
-        self.is_running = False
+        self.is_running = False       # 매매 실행 여부 (/stop으로 일시중지)
+        self._process_alive = True    # 프로세스 생존 여부 (실제 종료 시에만 False)
         self.last_candle_timestamp = 0
 
         # 일일 거래 기록
@@ -207,7 +208,12 @@ class TradingBot:
             return
 
         self.is_running = True
+        self._process_alive = True
         self.trade_logger.log_system_start()
+
+        # 텔레그램 명령어 등록 및 폴링 시작
+        self._register_telegram_commands()
+        self.notifier.start_polling()
 
         # 스케줄러 설정 (6시간 봉 마감 시)
         self.setup_scheduler()
@@ -215,10 +221,11 @@ class TradingBot:
         # 메인 루프
         try:
             self.logger.info("🚀 실전 모드 시작")
-            self.notifier.send_system_status("started", "실전 모드가 시작되었습니다.")
+            self.notifier.send_system_status("started", "실전 모드가 시작되었습니다.\n/help 로 사용 가능한 명령어를 확인하세요.")
 
-            while self.is_running:
-                schedule.run_pending()
+            while self._process_alive:
+                if self.is_running:
+                    schedule.run_pending()
                 time.sleep(60)  # 1분마다 체크
 
         except KeyboardInterrupt:
@@ -433,6 +440,11 @@ class TradingBot:
         self.logger.info("⏹️  시스템 종료 중...")
 
         self.is_running = False
+        self._process_alive = False
+
+        # 텔레그램 폴링 정지
+        self.notifier.stop_polling()
+
         self.trade_logger.log_system_stop()
 
         # 시스템 상태 알림
@@ -441,6 +453,128 @@ class TradingBot:
         # 메트릭 요약
         metrics_summary = self.metrics_logger.get_summary()
         self.logger.info(f"📊 메트릭 요약: {metrics_summary}")
+
+    # ─── 텔레그램 명령어 핸들러 ───
+
+    def _register_telegram_commands(self):
+        """텔레그램 명령어 콜백 등록"""
+        self.notifier.register_command("/start", self._cmd_start)
+        self.notifier.register_command("/stop", self._cmd_stop)
+        self.notifier.register_command("/status", self._cmd_status)
+        self.notifier.register_command("/help", self._cmd_help)
+        self.notifier.register_command("/balance", self._cmd_balance)
+
+    def _cmd_start(self) -> str:
+        """/start - 매매 재개"""
+        if self.is_running:
+            return "이미 매매가 실행 중입니다."
+
+        self.is_running = True
+        self.logger.info("텔레그램 /start 명령으로 매매 재개")
+        return (
+            "✅ 매매가 재개되었습니다.\n\n"
+            "스케줄러가 활성화되어 다음 캔들 마감 시\n"
+            "(00:00, 06:00, 12:00, 18:00 KST)\n"
+            "매매를 실행합니다."
+        )
+
+    def _cmd_stop(self) -> str:
+        """/stop - 매매 일시중지"""
+        if not self.is_running:
+            return "이미 매매가 중지된 상태입니다."
+
+        self.is_running = False
+        self.logger.info("텔레그램 /stop 명령으로 매매 일시중지")
+        return (
+            "⏸️ 매매가 일시중지되었습니다.\n\n"
+            "봇 프로세스는 계속 실행 중이며\n"
+            "텔레그램 명령은 계속 수신합니다.\n"
+            "보유 포지션은 영향받지 않습니다.\n\n"
+            "/start 로 매매를 재개할 수 있습니다."
+        )
+
+    def _cmd_status(self) -> str:
+        """/status - 현재 상태 조회"""
+        status = "🟢 실행 중" if self.is_running else "🔴 일시중지"
+
+        # 포지션 정보
+        if self.portfolio.has_position():
+            pos = self.portfolio.get_position()
+            entry_price = pos.get("entry_price", 0)
+            amount = pos.get("amount", 0)
+            entry_time = pos.get("entry_time")
+            entry_str = entry_time.strftime('%m/%d %H:%M') if entry_time else "N/A"
+            position_text = (
+                f"{self.config.ORDER_CURRENCY} {amount:.4f}\n"
+                f"   진입가: {entry_price:,.2f} KRW\n"
+                f"   진입시간: {entry_str}"
+            )
+        else:
+            position_text = "없음"
+
+        # 마지막 캔들
+        latest_candle = self.storage.get_latest_candle()
+        if latest_candle:
+            candle_time = datetime.fromtimestamp(latest_candle["timestamp"] / 1000)
+            candle_str = candle_time.strftime('%m/%d %H:%M')
+            candle_close = f"{latest_candle['close']:,.2f} KRW"
+        else:
+            candle_str = "N/A"
+            candle_close = "N/A"
+
+        return (
+            f"📊 봇 상태: {status}\n\n"
+            f"💵 KRW 잔고: {self.portfolio.krw_balance:,.0f}\n"
+            f"🪙 {self.config.ORDER_CURRENCY} 잔고: {self.portfolio.coin_balance:.4f}\n\n"
+            f"📦 포지션: {position_text}\n\n"
+            f"🕯️ 마지막 캔들: {candle_str}\n"
+            f"💰 종가: {candle_close}\n\n"
+            f"⚙️ 전략: 래리 윌리엄스 ({self.config.BREAKTHROUGH_RATIO}x)\n"
+            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+    def _cmd_help(self) -> str:
+        """/help - 사용 가능한 명령어"""
+        return (
+            "📋 사용 가능한 명령어\n\n"
+            "/start   - 매매 재개\n"
+            "/stop    - 매매 일시중지\n"
+            "/status  - 현재 상태 조회\n"
+            "/balance - 실시간 잔고 조회\n"
+            "/help    - 이 도움말 표시"
+        )
+
+    def _cmd_balance(self) -> str:
+        """/balance - 실시간 잔고 조회"""
+        try:
+            balance = self.order_executor.get_balance()
+            krw = float(balance.get(f"available_{self.config.TRADING_CURRENCY}", 0))
+            coin = float(balance.get(f"available_{self.config.ORDER_CURRENCY}", 0))
+
+            ticker = self.api.get_ticker(
+                order_currency=self.config.ORDER_CURRENCY,
+                payment_currency=self.config.TRADING_CURRENCY
+            )
+            current_price = float(ticker.get("closing_price", 0))
+
+            coin_value = coin * current_price
+            total = krw + coin_value
+
+            # 캐시 업데이트
+            self.portfolio.update_balance(krw, coin)
+
+            return (
+                f"💼 잔고 현황\n\n"
+                f"💵 KRW: {krw:,.0f}\n"
+                f"🪙 {self.config.ORDER_CURRENCY}: {coin:.4f}"
+                f" ({coin_value:,.0f} KRW)\n\n"
+                f"📊 총 자산: {total:,.0f} KRW\n"
+                f"💰 {self.config.ORDER_CURRENCY} 현재가: {current_price:,.2f} KRW\n\n"
+                f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        except Exception as e:
+            self.logger.error(f"잔고 조회 실패: {e}")
+            return f"❌ 잔고 조회 실패: {str(e)}"
 
 
 def main():

@@ -2,6 +2,9 @@
 알림 모듈
 """
 import logging
+import threading
+import time
+import requests
 from typing import Optional, Dict, Callable
 from datetime import datetime
 
@@ -30,14 +33,13 @@ class TelegramNotifier:
         # 텔레그램 Bot API URL
         self.api_url = f"https://api.telegram.org/bot{bot_token}"
 
-        # 명령어 처리기 등록
-        self.commands = {
-            "/start": self._cmd_start,
-            "/stop": self._cmd_stop,
-            "/status": self._cmd_status,
-            "/help": self._cmd_help,
-            "/balance": self._cmd_balance
-        }
+        # 폴링 상태
+        self._polling = False
+        self._polling_thread = None
+        self._last_update_id = 0
+
+        # 명령어 콜백 (TradingBot에서 등록)
+        self._command_callbacks = {}
 
     def _send_message(
         self,
@@ -54,8 +56,6 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        import requests
-
         url = f"{self.api_url}/sendMessage"
         data = {
             "chat_id": self.chat_id,
@@ -329,6 +329,118 @@ XRP 자동매매 시스템이 성공적으로 텔레그램에 연결되었습니
 🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
 
         return self._send_message(message, parse_mode="Markdown")
+
+    # ─── 텔레그램 명령어 수신 (폴링) ───
+
+    def register_command(self, command: str, callback: Callable[[], str]):
+        """
+        텔레그램 명령어 콜백 등록
+
+        Args:
+            command: 명령어 (예: "/start")
+            callback: 콜백 함수 (인자 없음, 응답 문자열 반환)
+        """
+        self._command_callbacks[command] = callback
+
+    def start_polling(self):
+        """텔레그램 메시지 폴링 스레드 시작"""
+        if self._polling:
+            self.logger.warning("텔레그램 폴링이 이미 실행 중입니다")
+            return
+
+        self._polling = True
+        self._polling_thread = threading.Thread(
+            target=self._polling_loop,
+            name="TelegramPolling",
+            daemon=True
+        )
+        self._polling_thread.start()
+        self.logger.info("텔레그램 폴링 스레드 시작")
+
+    def stop_polling(self):
+        """텔레그램 메시지 폴링 스레드 정지"""
+        self._polling = False
+        if self._polling_thread and self._polling_thread.is_alive():
+            self._polling_thread.join(timeout=15)
+        self.logger.info("텔레그램 폴링 스레드 정지")
+
+    def _polling_loop(self):
+        """getUpdates 폴링 루프 (데몬 스레드에서 실행)"""
+        while self._polling:
+            try:
+                updates = self._get_updates()
+                for update in updates:
+                    self._handle_update(update)
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"텔레그램 폴링 네트워크 오류: {e}")
+            except Exception as e:
+                self.logger.error(f"텔레그램 폴링 오류: {e}", exc_info=True)
+
+            time.sleep(3)
+
+    def _get_updates(self) -> list:
+        """
+        Telegram getUpdates API 호출 (long polling)
+
+        Returns:
+            업데이트 리스트
+        """
+        url = f"{self.api_url}/getUpdates"
+        params = {
+            "offset": self._last_update_id + 1,
+            "timeout": 10,
+            "allowed_updates": '["message"]'
+        }
+
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+
+        data = response.json()
+        if not data.get("ok"):
+            self.logger.error(f"getUpdates 실패: {data}")
+            return []
+
+        return data.get("result", [])
+
+    def _handle_update(self, update: dict):
+        """
+        수신된 Telegram 업데이트 처리
+
+        Args:
+            update: Telegram Update 객체
+        """
+        update_id = update.get("update_id", 0)
+        self._last_update_id = max(self._last_update_id, update_id)
+
+        message = update.get("message")
+        if not message:
+            return
+
+        # 인증: 허가된 chat_id만 처리
+        chat_id = str(message.get("chat", {}).get("id", ""))
+        if chat_id != str(self.chat_id):
+            self.logger.warning(f"미인증 chat_id: {chat_id}")
+            return
+
+        text = message.get("text", "").strip()
+        if not text.startswith("/"):
+            return
+
+        # 명령어 파싱 ("/command@botname" 형식 대응)
+        command = text.split()[0].split("@")[0].lower()
+
+        callback = self._command_callbacks.get(command)
+        if callback:
+            try:
+                response_text = callback()
+                self._send_message(response_text)
+            except Exception as e:
+                self.logger.error(f"명령어 처리 오류 ({command}): {e}", exc_info=True)
+                self._send_message(f"명령어 처리 중 오류 발생: {str(e)}")
+        else:
+            self._send_message(
+                f"알 수 없는 명령어: {command}\n/help 로 사용 가능한 명령어를 확인하세요."
+            )
 
 
 class NotificationManager:
