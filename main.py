@@ -279,8 +279,8 @@ class TradingBot:
             # 3. 잔고 업데이트
             self.logger.info("3️⃣ 잔고 조회 중...")
             balance = self.order_executor.get_balance()
-            krw_balance = float(balance.get(f"available_{self.config.TRADING_CURRENCY}", 0))
-            coin_balance = float(balance.get(f"available_{self.config.ORDER_CURRENCY}", 0))
+            krw_balance = float(balance.get(f"available_{self.config.TRADING_CURRENCY.lower()}", 0))
+            coin_balance = float(balance.get(f"available_{self.config.ORDER_CURRENCY.lower()}", 0))
 
             self.portfolio.update_balance(krw_balance, coin_balance)
 
@@ -548,8 +548,8 @@ class TradingBot:
         """/balance - 실시간 잔고 조회"""
         try:
             balance = self.order_executor.get_balance()
-            krw = float(balance.get(f"available_{self.config.TRADING_CURRENCY}", 0))
-            coin = float(balance.get(f"available_{self.config.ORDER_CURRENCY}", 0))
+            krw = float(balance.get(f"available_{self.config.TRADING_CURRENCY.lower()}", 0))
+            coin = float(balance.get(f"available_{self.config.ORDER_CURRENCY.lower()}", 0))
 
             ticker = self.api.get_ticker(
                 order_currency=self.config.ORDER_CURRENCY,

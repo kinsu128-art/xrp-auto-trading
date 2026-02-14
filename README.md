@@ -9,8 +9,10 @@
 - [빠른 시작 (Docker)](#-빠른-시작-docker)
 - [설정](#-설정)
 - [사용법](#-사용법)
+- [텔레그램 제어](#-텔레그램-제어)
 - [로컬 실행 (Docker 없이)](#-로컬-실행-docker-없이)
 - [전략 설명](#-전략-설명)
+- [파일 구조](#-파일-구조)
 - [주의사항](#-주의사항)
 
 ---
@@ -21,7 +23,7 @@
 - 🐳 **Docker 지원**: 컨테이너로 어디서든 동일하게 실행
 - 📊 **백테스트**: 과거 데이터로 전략 검증
 - 📈 **시각화**: 차트 및 HTML 리포트 생성
-- 🔔 **텔레그램 알림**: 매수/매도/에러 실시간 알림
+- 🔔 **텔레그램 제어**: 매수/매도/에러 알림 + 명령어로 봇 제어 (`/start`, `/stop`, `/status`, `/balance`)
 - 🏪 **빗썸 API**: 빗썸 거래소와 연동
 - 💾 **데이터 관리**: SQLite를 이용한 캔들 데이터 저장
 
@@ -160,7 +162,7 @@ docker compose down
 docker compose restart
 ```
 
-> 실행 중 매매를 일시중지하려면 텔레그램에서 `/stop`을 보내세요. 컨테이너를 내릴 필요 없이 `/start`로 재개할 수 있습니다.
+> 실행 중 매매를 일시중지하려면 텔레그램에서 `/stop`을 보내세요. 컨테이너를 내릴 필요 없이 `/start`로 재개할 수 있습니다. 자세한 내용은 [텔레그램 제어](#-텔레그램-제어) 섹션을 참조하세요.
 
 ### Docker 단독 실행
 
@@ -223,6 +225,30 @@ Docker 볼륨 마운트를 통해 다음 데이터가 호스트에 유지됩니�
 - `equity_curve.png` - 수익률 곡선
 - `drawdown.png` - 최대 손실률 차트
 - `trade_distribution.png` - 거래 분포
+
+---
+
+## 📱 텔레그램 제어
+
+실전 모드에서 봇은 텔레그램 메시지를 통해 양방향 제어가 가능합니다. 봇이 시작되면 자동으로 텔레그램 폴링을 시작하여 명령어를 수신합니다.
+
+### 명령어
+
+| 명령어 | 기능 | 설명 |
+|---|---|---|
+| `/start` | 매매 재개 | 일시중지된 매매를 재개합니다 |
+| `/stop` | 매매 일시중지 | 매매만 중지, 봇 프로세스와 텔레그램 수신은 유지 |
+| `/status` | 상태 조회 | 실행 상태, 포지션, 잔고, 마지막 캔들 정보 |
+| `/balance` | 잔고 조회 | 빗썸 API에서 실시간 KRW/XRP 잔고 조회 |
+| `/help` | 도움말 | 사용 가능한 명령어 목록 |
+
+### 동작 방식
+
+- **폴링 방식**: Telegram Bot API `getUpdates`를 사용한 long polling (별도 데몬 스레드)
+- **인증**: 설정된 `TELEGRAM_CHAT_ID`에서 온 메시지만 처리, 다른 사용자의 명령은 무시
+- **`/stop` vs `docker compose down`**:
+  - `/stop`: 매매만 일시중지, 봇 프로세스는 계속 실행되어 텔레그램 명령을 수신
+  - `docker compose down`: 컨테이너와 봇 프로세스를 완전히 종료
 
 ---
 
@@ -307,23 +333,27 @@ xrp-auto-trading/
 ├── .env.example              # 환경 변수 템플릿
 ├── .gitignore                # Git 무시 파일
 ├── requirements.txt          # Python 패키지 목록
-├── main.py                   # 메인 실행 파일 (TradingBot)
-├── config.py                 # 설정 관리
-├── bithumb_api.py            # 빗썸 API 클라이언트
+├── __init__.py               # 패키지 초기화
+├── main.py                   # 메인 실행 파일 (TradingBot + 텔레그램 명령 핸들러)
+├── config.py                 # 설정 관리 (환경 변수 기반)
+├── bithumb_api.py            # 빗썸 API 클라이언트 (HMAC-SHA512)
 ├── strategy_engine.py        # 래리 윌리엄스 전략 엔진
 ├── order_executor.py         # 주문 실행기 (재시도 포함)
 ├── data_collector.py         # 캔들 데이터 수집기
 ├── data_storage.py           # SQLite 데이터 저장소
 ├── portfolio.py              # 포트폴리오/포지션 관리
-├── notification.py           # 텔레그램 알림
+├── notification.py           # 텔레그램 알림 및 명령어 수신 (폴링)
 ├── backtester.py             # 백테스트 엔진
-├── visualizer.py             # 차트/리포트 시각화
+├── visualizer.py             # 차트/리포트 시각화 (헤드리스)
 ├── logger.py                 # 로깅 시스템
 ├── utils.py                  # 유틸리티 함수
 ├── exceptions.py             # 커스텀 예외
+├── deploy.bat                # Windows 배포 스크립트
+├── DEPLOY.md                 # 배포 가이드
 ├── data/                     # 캔들 DB (Docker 볼륨)
 ├── logs/                     # 로그 파일 (Docker 볼륨)
 ├── reports/                  # 백테스트 리포트 (Docker 볼륨)
+├── docs/                     # 추가 문서
 └── tests/                    # 테스트 코드
 ```
 
