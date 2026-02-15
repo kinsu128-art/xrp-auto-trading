@@ -369,7 +369,8 @@ class TradingBot:
                 self.logger.error(f"매수 실행 실패: {str(e)}")
                 self.notifier.send_error("BuyError", str(e))
         else:
-            self.logger.debug("매수 조건 미충족")
+            self.logger.info(f"매수 조건 미충족: {', '.join(buy_signal.get('reasons', []))}")
+            self._notify_buy_analysis(candles, buy_signal)
 
     def _check_sell_position(self, candles: list):
         """
@@ -453,6 +454,55 @@ class TradingBot:
         # 메트릭 요약
         metrics_summary = self.metrics_logger.get_summary()
         self.logger.info(f"📊 메트릭 요약: {metrics_summary}")
+
+    # ─── 매수 조건 분석 알림 ───
+
+    def _notify_buy_analysis(self, candles: list, buy_signal: dict):
+        """
+        매수 불발 시 조건 분석 결과를 텔레그램으로 전송
+
+        Args:
+            candles: 캔들 데이터
+            buy_signal: 전략 엔진의 매수 신호 결과
+        """
+        try:
+            current = candles[-1]
+            prev = candles[-2]
+            ts = datetime.fromtimestamp(current["timestamp"] / 1000)
+
+            conditions = buy_signal.get("conditions", {})
+            bp = buy_signal.get("breakthrough_price", 0)
+            avg_close = buy_signal.get("avg_close", 0)
+
+            prev_range = prev["high"] - prev["low"]
+
+            # 조건별 PASS/FAIL 표시
+            c1 = conditions.get("breakthrough", False)
+            c2 = conditions.get("above_avg", False)
+            c3 = conditions.get("volume_increase", False)
+
+            mark = lambda v: "O" if v else "X"
+
+            msg = (
+                f"[{ts.strftime('%m/%d %H:%M')}] 매수 조건 분석\n\n"
+                f"[{mark(c1)}] 조건1: 돌파 기준선\n"
+                f"  고가({current['high']:,.0f}) {'>' if c1 else '<='} 기준선({bp:,.1f})\n"
+                f"  기준선 = 시가({current['open']:,.0f}) + 변동폭({prev_range:,.0f}) x 0.5\n\n"
+                f"[{mark(c2)}] 조건2: 5봉 평균 상회\n"
+                f"  기준선({bp:,.1f}) {'>' if c2 else '<='} 평균({avg_close:,.1f})\n\n"
+                f"[{mark(c3)}] 조건3: 거래량 증가\n"
+                f"  현재({current['volume']:,.0f}) {'>' if c3 else '<='} 전봉({prev['volume']:,.0f})\n\n"
+                f"결과: 매수 불발"
+            )
+
+            reasons = buy_signal.get("reasons", [])
+            if reasons:
+                msg += f" ({', '.join(reasons)})"
+
+            self.notifier._send_message(msg)
+
+        except Exception as e:
+            self.logger.error(f"매수 분석 알림 실패: {e}")
 
     # ─── 텔레그램 명령어 핸들러 ───
 
