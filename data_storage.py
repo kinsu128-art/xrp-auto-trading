@@ -108,7 +108,7 @@ class DataStorage:
         Args:
             start_timestamp: 시작 타임스탬프
             end_timestamp: 종료 타임스탬프
-            limit: 가져올 최대 개수
+            limit: 가져올 최대 개수 (최신 데이터부터)
 
         Returns:
             캔들 데이터 리스트
@@ -124,11 +124,12 @@ class DataStorage:
             query += " AND timestamp <= ?"
             params.append(end_timestamp)
 
-        query += " ORDER BY timestamp ASC"
-
+        # limit이 있으면 최신 데이터를 가져오기 위해 DESC로 정렬
         if limit:
-            query += " LIMIT ?"
+            query += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
+        else:
+            query += " ORDER BY timestamp ASC"
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -146,6 +147,10 @@ class DataStorage:
                 "close": row[4],
                 "volume": row[5]
             })
+
+        # limit을 사용한 경우 시간순으로 재정렬
+        if limit:
+            candles.reverse()
 
         return candles
 
