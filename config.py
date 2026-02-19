@@ -32,6 +32,7 @@ class Config:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE = os.getenv("LOG_FILE", "logs/app.log")
     ERROR_LOG_FILE = os.getenv("ERROR_LOG_FILE", "logs/error.log")
+    LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "7"))  # 로그 보관 일수
 
     # API 설정
     BITHUMB_API_URL = os.getenv("BITHUMB_API_URL", "https://api.bithumb.com")

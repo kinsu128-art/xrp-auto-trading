@@ -28,7 +28,7 @@ from visualizer import Visualizer
 from order_executor import OrderExecutor
 from portfolio import Portfolio
 from notification import TelegramNotifier, NotificationManager
-from logger import setup_logger, TradeLogger, MetricsLogger
+from logger import setup_logger, TradeLogger, MetricsLogger, cleanup_old_logs
 
 
 class TradingBot:
@@ -238,7 +238,7 @@ class TradingBot:
 
     def setup_scheduler(self):
         """
-        스케줄러 설정 (6시간 봉 마감)
+        스케줄러 설정 (6시간 봉 마감 + 일일 로그 정리)
         """
         # 6시간 봉 마감 시간대: 한국시간 00:00, 06:00, 12:00, 18:00
         schedule.every().day.at("00:00").do(self.on_candle_close)
@@ -246,7 +246,18 @@ class TradingBot:
         schedule.every().day.at("12:00").do(self.on_candle_close)
         schedule.every().day.at("18:00").do(self.on_candle_close)
 
-        self.logger.info("📅 스케줄러 설정 완료 (00:00, 06:00, 12:00, 18:00)")
+        # 매일 03:00에 오래된 로그 정리
+        schedule.every().day.at("03:00").do(self.cleanup_logs)
+
+        self.logger.info("📅 스케줄러 설정 완료 (00:00, 06:00, 12:00, 18:00 / 로그 정리 03:00)")
+
+    def cleanup_logs(self):
+        """오래된 로그 파일 정리"""
+        try:
+            cleanup_old_logs(self.config.LOG_FILE, self.config.LOG_RETENTION_DAYS, self.logger)
+            cleanup_old_logs(self.config.ERROR_LOG_FILE, self.config.LOG_RETENTION_DAYS, self.logger)
+        except Exception as e:
+            self.logger.error(f"로그 정리 중 에러: {e}")
 
     def on_candle_close(self):
         """

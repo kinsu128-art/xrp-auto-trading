@@ -104,8 +104,18 @@ class DataCollector:
             # 최신 캔들 조회
             latest_candle = self.storage.get_latest_candle()
 
-            if latest_candle:
-                # 최신 캔들 이후의 데이터만 수집
+            if not latest_candle:
+                # 저장된 데이터가 없는 경우 초기 수집
+                return self.fetch_initial_data(order_currency, payment_currency, chart_intervals)
+
+            # 캔들 마감 직후 API 데이터 갱신 지연 대비 30초 대기
+            self.logger.info("캔들 마감 데이터 반영 대기 (30초)...")
+            time.sleep(30)
+
+            # 신규 캔들 조회 재시도 (최대 3회, 30초 간격)
+            candle_fetch_max_retries = 3
+
+            for candle_attempt in range(candle_fetch_max_retries):
                 new_candles = []
                 max_retries = 3
 
@@ -132,18 +142,20 @@ class DataCollector:
                             time.sleep(2)
                         else:
                             raise
-            else:
-                # 저장된 데이터가 없는 경우 초기 수집
-                return self.fetch_initial_data(order_currency, payment_currency, chart_intervals)
 
-            if new_candles:
-                # 데이터 저장
-                saved_count = self.storage.save_candles(new_candles, order_currency)
-                self.logger.info(f"{len(new_candles)}개 신규 캔들 수집, {saved_count}개 저장 완료")
-                return saved_count
-            else:
-                self.logger.info("새로운 캔들 데이터가 없습니다.")
-                return 0
+                if new_candles:
+                    # 데이터 저장
+                    saved_count = self.storage.save_candles(new_candles, order_currency)
+                    self.logger.info(f"{len(new_candles)}개 신규 캔들 수집, {saved_count}개 저장 완료")
+                    return saved_count
+
+                # 마지막 시도가 아니면 30초 후 재시도
+                if candle_attempt < candle_fetch_max_retries - 1:
+                    self.logger.info(f"새로운 캔들 없음, 30초 후 재시도 ({candle_attempt + 1}/{candle_fetch_max_retries})")
+                    time.sleep(30)
+
+            self.logger.info("새로운 캔들 데이터가 없습니다. (재시도 모두 소진)")
+            return 0
 
         except BithumbAPIError as e:
             self.logger.error(f"데이터 업데이트 실패: {str(e)}")

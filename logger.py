@@ -3,7 +3,8 @@
 """
 import logging
 import os
-from datetime import datetime
+import glob
+from datetime import datetime, timedelta
 from typing import Optional, Dict
 from logging.handlers import RotatingFileHandler
 
@@ -261,3 +262,77 @@ class MetricsLogger:
         self.api_call_count = 0
         self.trade_count = 0
         self.error_count = 0
+
+
+def cleanup_old_logs(log_file: str, retention_days: int = 7, logger: Optional[logging.Logger] = None):
+    """
+    오래된 로그 내역 정리
+
+    1) 메인 로그 파일에서 retention_days 이전 항목 제거
+    2) 오래된 로테이션 백업 파일 삭제
+
+    Args:
+        log_file: 로그 파일 경로 (예: logs/app.log)
+        retention_days: 보관 일수
+        logger: 로거 (정리 결과 기록용)
+    """
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
+    cutoff_str = cutoff_date.strftime("%Y-%m-%d %H:%M:%S")
+    total_removed = 0
+
+    # 1) 메인 로그 파일에서 오래된 항목 제거
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            original_count = len(lines)
+            recent_lines = []
+
+            for line in lines:
+                # 로그 형식: "2026-02-20 06:00:11 - ..." 에서 날짜 추출
+                if len(line) >= 19:
+                    try:
+                        log_date = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S")
+                        if log_date >= cutoff_date:
+                            recent_lines.append(line)
+                            continue
+                    except ValueError:
+                        pass
+                    # 날짜 파싱 실패한 줄은 직전 줄의 연속(stacktrace 등)으로 간주
+                    # recent_lines에 이미 항목이 있으면 포함
+                    if recent_lines:
+                        recent_lines.append(line)
+                else:
+                    if recent_lines:
+                        recent_lines.append(line)
+
+            removed_count = original_count - len(recent_lines)
+
+            if removed_count > 0:
+                with open(log_file, "w", encoding="utf-8") as f:
+                    f.writelines(recent_lines)
+                total_removed += removed_count
+
+        except Exception as e:
+            if logger:
+                logger.error(f"로그 파일 정리 실패 ({log_file}): {e}")
+
+    # 2) 오래된 로테이션 백업 파일 삭제 (app.log.1, app.log.2, ...)
+    backup_pattern = f"{log_file}.*"
+    for backup_file in glob.glob(backup_pattern):
+        try:
+            modified_time = datetime.fromtimestamp(os.path.getmtime(backup_file))
+            if modified_time < cutoff_date:
+                os.remove(backup_file)
+                total_removed += 1
+                if logger:
+                    logger.debug(f"오래된 백업 로그 삭제: {backup_file}")
+        except Exception as e:
+            if logger:
+                logger.error(f"백업 로그 삭제 실패 ({backup_file}): {e}")
+
+    if logger:
+        logger.info(f"로그 정리 완료: {log_file} ({retention_days}일 이전 항목 {total_removed}건 제거)")
+
+    return total_removed
