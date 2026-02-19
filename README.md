@@ -142,10 +142,10 @@ docker compose up -d --build
 
 ### Docker Compose 명령어
 
+```bash
 # master 브랜치 최신 상태로 업데이트
 git pull origin master
 
-```bash
 # 실전 모드 (백그라운드 실행)
 docker compose up -d --build
 
