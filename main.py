@@ -238,18 +238,20 @@ class TradingBot:
 
     def setup_scheduler(self):
         """
-        스케줄러 설정 (6시간 봉 마감 + 일일 로그 정리)
+        스케줄러 설정 (4시간 봉 마감 + 일일 로그 정리)
         """
-        # 6시간 봉 마감 시간대: 한국시간 00:00, 06:00, 12:00, 18:00
+        # 4시간 봉 마감 시간대: 한국시간 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
         schedule.every().day.at("00:00").do(self.on_candle_close)
-        schedule.every().day.at("06:00").do(self.on_candle_close)
+        schedule.every().day.at("04:00").do(self.on_candle_close)
+        schedule.every().day.at("08:00").do(self.on_candle_close)
         schedule.every().day.at("12:00").do(self.on_candle_close)
-        schedule.every().day.at("18:00").do(self.on_candle_close)
+        schedule.every().day.at("16:00").do(self.on_candle_close)
+        schedule.every().day.at("20:00").do(self.on_candle_close)
 
         # 매일 03:00에 오래된 로그 정리
         schedule.every().day.at("03:00").do(self.cleanup_logs)
 
-        self.logger.info("📅 스케줄러 설정 완료 (00:00, 06:00, 12:00, 18:00 / 로그 정리 03:00)")
+        self.logger.info("📅 스케줄러 설정 완료 (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 / 로그 정리 03:00)")
 
     def cleanup_logs(self):
         """오래된 로그 파일 정리"""
@@ -535,7 +537,7 @@ class TradingBot:
         return (
             "✅ 매매가 재개되었습니다.\n\n"
             "스케줄러가 활성화되어 다음 캔들 마감 시\n"
-            "(00:00, 06:00, 12:00, 18:00 KST)\n"
+            "(00:00, 04:00, 08:00, 12:00, 16:00, 20:00 KST)\n"
             "매매를 실행합니다."
         )
 

@@ -117,7 +117,7 @@ docker compose up -d --build
 | `TRADING_CURRENCY` | 결제 통화 | `KRW` |
 | `ORDER_CURRENCY` | 주문 통화 | `XRP` |
 | `BREAKTHROUGH_RATIO` | 돌파 배율 | `0.5` |
-| `CANDLE_PERIOD` | 캔들 주기 | `6h` |
+| `CANDLE_PERIOD` | 캔들 주기 | `4h` |
 | `NUM_CANDLES_FOR_AVG` | 평균 계산 봉 수 | `5` |
 | `LOG_LEVEL` | 로그 레벨 | `INFO` |
 | `DATABASE_PATH` | DB 파일 경로 | `data/candles.db` |
@@ -294,7 +294,7 @@ python main.py --mode live
 
 ### 래리 윌리엄스 돌파 전략
 
-6시간 봉 기준으로 동작하는 단기 매매 전략입니다.
+4시간 봉 기준으로 동작하는 단기 매매 전략입니다.
 
 #### 매수 조건 (3가지 모두 충족 시)
 
@@ -316,12 +316,12 @@ python main.py --mode live
 #### 매도 조건
 
 ```
-매수 후 다음 6시간 봉 시가에 매도
+매수 후 다음 4시간 봉 시가에 매도
 ```
 
 #### 스케줄
 
-한국시간 기준 **00:00, 06:00, 12:00, 18:00** 에 캔들 마감 체크 및 매매 실행
+한국시간 기준 **00:00, 04:00, 08:00, 12:00, 16:00, 20:00** 에 캔들 마감 체크 및 매매 실행
 
 ---
 
