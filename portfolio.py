@@ -203,7 +203,7 @@ class Portfolio:
             "amount": amount,
             "entry_price": price,
             "entry_time": datetime.now(),
-            "buy_candle": candle
+            "entry_candle": candle
         }
         self.position_count += 1
 
@@ -245,6 +245,7 @@ class Portfolio:
             "entry_time": entry_time,
             "exit_time": datetime.now(),
             "duration": duration,
+            "duration_hours": duration.total_seconds() / 3600,
             "position_count": self.position_count
         }
 

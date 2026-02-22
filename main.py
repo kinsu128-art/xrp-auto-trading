@@ -278,6 +278,35 @@ class TradingBot:
             )
             self.logger.info(f"   {updated_count}개 캔들 업데이트 완료")
 
+            if updated_count == 0:
+                # 다음 캔들 시간 계산
+                _now = datetime.now()
+                _candle_hours = [0, 4, 8, 12, 16, 20]
+                _next_hour = next((h for h in _candle_hours if h > _now.hour), None)
+                if _next_hour is None:
+                    _next_dt = (_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                else:
+                    _next_dt = _now.replace(hour=_next_hour, minute=0, second=0, microsecond=0)
+                _next_time_str = _next_dt.strftime('%H:%M')
+
+                if self.portfolio.has_position():
+                    position = self.portfolio.get_position()
+                    self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 포지션 보유 중, 매도는 다음 캔들에서 재시도")
+                    self.notifier.send_system_status(
+                        "warning",
+                        f"캔들 데이터 업데이트 실패 - 포지션 보유 중\n"
+                        f"진입가: {position['entry_price']:,.0f} KRW | 수량: {position['amount']:.4f} XRP\n"
+                        f"다음 캔들({_next_time_str})에서 매도 재시도합니다."
+                    )
+                else:
+                    self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 분석 건너뜀 (중복 알림 방지)")
+                    self.notifier.send_system_status(
+                        "warning",
+                        f"캔들 데이터 업데이트 실패 - 새로운 캔들 없음\n"
+                        f"다음 캔들({_next_time_str})에서 재시도합니다."
+                    )
+                return
+
             # 2. 최신 캔들 조회
             self.logger.info("2️⃣ 최신 캔들 조회 중...")
             candles = self.storage.load_candles(limit=10)
@@ -347,33 +376,63 @@ class TradingBot:
 
             # 매수 실행
             try:
-                self.logger.info(f"📥 매수 실행: {amount:.8f} @ {buy_signal['breakthrough_price']:.2f}")
+                order_krw = amount * buy_signal["breakthrough_price"]
+                self.logger.info(f"📥 매수 실행: {order_krw:,.0f} KRW (기준선: {buy_signal['breakthrough_price']:.2f})")
+
+                # 매수 전 코인 잔고 저장
+                coin_balance_before = self.portfolio.coin_balance
 
                 result = self.order_executor.market_buy(
                     order_currency=self.config.ORDER_CURRENCY,
-                    amount_krw=amount * buy_signal["breakthrough_price"]
+                    amount_krw=order_krw
                 )
 
-                # 포지션 오픈
+                # 체결 반영 대기 후 잔고 재조회
+                import time as _time
+                _time.sleep(3)
+                balance_after = self.order_executor.get_balance()
+                coin_balance_after = float(balance_after.get(
+                    f"available_{self.config.ORDER_CURRENCY.lower()}", 0
+                ))
+                actual_amount = coin_balance_after - coin_balance_before
+
+                if actual_amount <= 0:
+                    self.logger.warning(
+                        f"⚠️ 실제 체결 수량 확인 불가 (잔고 차이: {actual_amount:.8f}), 계산값 사용"
+                    )
+                    actual_amount = amount
+
+                # 실제 체결 단가 계산
+                actual_price = order_krw / actual_amount
+
+                self.logger.info(f"✅ 체결 확인: {actual_amount:.8f} XRP @ {actual_price:.2f} KRW")
+
+                # 포지션 오픈 (실제 체결 수량/가격 사용)
                 self.portfolio.open_position(
-                    amount=amount,
-                    price=buy_signal["breakthrough_price"],
+                    amount=actual_amount,
+                    price=actual_price,
                     candle=candles[-1]
                 )
+
+                # 잔고 업데이트
+                krw_balance_after = float(balance_after.get(
+                    f"available_{self.config.TRADING_CURRENCY.lower()}", 0
+                ))
+                self.portfolio.update_balance(krw_balance_after, coin_balance_after)
 
                 # 알림
                 self.notifier.send_buy_signal(
                     currency=self.config.ORDER_CURRENCY,
-                    amount=amount,
-                    price=buy_signal["breakthrough_price"],
+                    amount=actual_amount,
+                    price=actual_price,
                     breakthrough_price=buy_signal.get("breakthrough_price"),
                     avg_close=buy_signal.get("avg_close")
                 )
 
                 self.trade_logger.log_buy(
                     currency=self.config.ORDER_CURRENCY,
-                    amount=amount,
-                    price=buy_signal["breakthrough_price"]
+                    amount=actual_amount,
+                    price=actual_price
                 )
 
                 self.metrics_logger.log_trade()
@@ -414,12 +473,6 @@ class TradingBot:
 
                 # 포지션 클로즈
                 position_info = self.portfolio.close_position(sell_signal["sell_price"])
-
-                # 수익 정보
-                profit_info = self.strategy.calculate_expected_profit(
-                    buy_price=position["entry_price"],
-                    sell_price=sell_signal["sell_price"]
-                )
 
                 # 알림
                 self.notifier.send_sell_signal(
