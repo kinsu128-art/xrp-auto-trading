@@ -215,7 +215,7 @@ class TradingBot:
         self._register_telegram_commands()
         self.notifier.start_polling()
 
-        # 스케줄러 설정 (6시간 봉 마감 시)
+        # 스케줄러 설정 (4시간 봉 마감 시)
         self.setup_scheduler()
 
         # 메인 루프

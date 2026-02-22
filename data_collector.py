@@ -85,7 +85,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "6h"
+        chart_intervals: str = "4h"
     ) -> int:
         """
         실시간 데이터 업데이트
@@ -165,7 +165,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "6h"
+        chart_intervals: str = "4h"
     ) -> Optional[Dict]:
         """
         현재 봉 데이터 조회
@@ -254,7 +254,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "6h"
+        chart_intervals: str = "4h"
     ) -> Optional[Dict]:
         """
         마감된 최신 캔들 조회
