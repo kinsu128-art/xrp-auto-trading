@@ -163,9 +163,9 @@ class BithumbAPI:
                 formatted_candles.append({
                     "timestamp": candle[0],
                     "open": float(candle[1]),
-                    "high": float(candle[2]),
-                    "low": float(candle[3]),
-                    "close": float(candle[4]),
+                    "close": float(candle[2]),
+                    "high": float(candle[3]),
+                    "low": float(candle[4]),
                     "volume": float(candle[5])
                 })
 
