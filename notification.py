@@ -283,6 +283,44 @@ class TelegramNotifier:
 
         return self._send_message(message, parse_mode="Markdown")
 
+    def send_candle_fetch_failed(
+        self,
+        is_retry: bool,
+        next_time: str,
+        position: Optional[Dict] = None
+    ) -> bool:
+        """
+        캔들 데이터 수집 실패 알림
+
+        Args:
+            is_retry: 재시도 여부 (True=재시도에서도 실패, False=첫 실패)
+            next_time: 다음 재시도 시각 또는 다음 캔들 시각 (HH:MM)
+            position: 포지션 정보 (보유 중일 때만 전달)
+
+        Returns:
+            전송 성공 여부
+        """
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if is_retry:
+            title = "⚠️ 캔들 데이터 재시도 실패"
+            next_line = f"다음 캔들({next_time})까지 대기합니다."
+        else:
+            title = "⚠️ 캔들 데이터 수집 실패"
+            next_line = f"10분 후 자동 재시도합니다.\n재시도 실패 시 다음 캔들: {next_time}"
+
+        position_line = ""
+        if position:
+            title += " [포지션 보유 중]"
+            position_line = (
+                f"\n진입가: {position['entry_price']:,.0f} KRW"
+                f" | 수량: {position['amount']:.4f} XRP"
+            )
+
+        message = f"{title}\n🕐 {now_str}{position_line}\n{next_line}"
+
+        return self._send_message(message)
+
     def send_daily_report(
         self,
         trades: list,

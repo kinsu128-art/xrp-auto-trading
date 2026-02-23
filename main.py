@@ -294,42 +294,27 @@ class TradingBot:
                     _next_dt = _now.replace(hour=_next_hour, minute=0, second=0, microsecond=0)
                 _next_time_str = _next_dt.strftime('%H:%M')
 
+                position = self.portfolio.get_position() if self.portfolio.has_position() else None
+
                 if is_retry:
                     # 재시도에서도 실패 → 다음 캔들까지 대기
-                    if self.portfolio.has_position():
-                        position = self.portfolio.get_position()
-                        self.logger.warning("⚠️ 재시도에서도 캔들 데이터 없음 - 다음 캔들까지 대기")
-                        self.notifier.send_system_status(
-                            "warning",
-                            f"캔들 데이터 재시도 실패 - 포지션 보유 중\n"
-                            f"진입가: {position['entry_price']:,.0f} KRW | 수량: {position['amount']:.4f} XRP\n"
-                            f"다음 캔들({_next_time_str})에서 재시도합니다."
-                        )
-                    else:
-                        self.logger.warning("⚠️ 재시도에서도 캔들 데이터 없음 - 다음 캔들까지 대기")
-                        self.notifier.send_system_status(
-                            "warning",
-                            f"캔들 데이터 재시도 실패\n"
-                            f"다음 캔들({_next_time_str})에서 재시도합니다."
-                        )
+                    self.logger.warning("⚠️ 재시도에서도 캔들 데이터 없음 - 다음 캔들까지 대기")
+                    self.notifier.send_candle_fetch_failed(
+                        is_retry=True,
+                        next_time=_next_time_str,
+                        position=position
+                    )
                 else:
                     # 첫 실패 → 10분 후 재시도 예약
-                    if self.portfolio.has_position():
-                        position = self.portfolio.get_position()
-                        self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 포지션 보유 중, 10분 후 재시도 예약")
-                        self.notifier.send_system_status(
-                            "warning",
-                            f"캔들 데이터 업데이트 실패 - 포지션 보유 중\n"
-                            f"진입가: {position['entry_price']:,.0f} KRW | 수량: {position['amount']:.4f} XRP\n"
-                            f"10분 후 재시도합니다."
-                        )
-                    else:
-                        self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 10분 후 재시도 예약")
-                        self.notifier.send_system_status(
-                            "warning",
-                            f"캔들 데이터 업데이트 실패\n"
-                            f"10분 후 재시도합니다. (실패 시 다음 캔들: {_next_time_str})"
-                        )
+                    log_msg = "⚠️ 새로운 캔들 데이터 없음 - 10분 후 재시도 예약"
+                    if position:
+                        log_msg += " (포지션 보유 중)"
+                    self.logger.warning(log_msg)
+                    self.notifier.send_candle_fetch_failed(
+                        is_retry=False,
+                        next_time=_next_time_str,
+                        position=position
+                    )
 
                     # 기존 타이머가 있으면 취소 후 새로 예약
                     if self._candle_retry_timer and self._candle_retry_timer.is_alive():
