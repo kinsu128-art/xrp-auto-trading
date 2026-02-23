@@ -8,6 +8,7 @@ import time
 import logging
 import schedule
 import argparse
+import threading
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -105,6 +106,7 @@ class TradingBot:
         self.is_running = False       # 매매 실행 여부 (/stop으로 일시중지)
         self._process_alive = True    # 프로세스 생존 여부 (실제 종료 시에만 False)
         self.last_candle_timestamp = 0
+        self._candle_retry_timer = None  # 캔들 데이터 재시도 타이머
 
         # 일일 거래 기록
         self.daily_trades = []
@@ -261,9 +263,12 @@ class TradingBot:
         except Exception as e:
             self.logger.error(f"로그 정리 중 에러: {e}")
 
-    def on_candle_close(self):
+    def on_candle_close(self, is_retry: bool = False):
         """
         캔들 마감 처리
+
+        Args:
+            is_retry: 재시도 여부 (True이면 실패 시 추가 재시도 예약 안 함)
         """
         try:
             self.logger.info("=" * 50)
@@ -289,23 +294,57 @@ class TradingBot:
                     _next_dt = _now.replace(hour=_next_hour, minute=0, second=0, microsecond=0)
                 _next_time_str = _next_dt.strftime('%H:%M')
 
-                if self.portfolio.has_position():
-                    position = self.portfolio.get_position()
-                    self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 포지션 보유 중, 매도는 다음 캔들에서 재시도")
-                    self.notifier.send_system_status(
-                        "warning",
-                        f"캔들 데이터 업데이트 실패 - 포지션 보유 중\n"
-                        f"진입가: {position['entry_price']:,.0f} KRW | 수량: {position['amount']:.4f} XRP\n"
-                        f"다음 캔들({_next_time_str})에서 매도 재시도합니다."
-                    )
+                if is_retry:
+                    # 재시도에서도 실패 → 다음 캔들까지 대기
+                    if self.portfolio.has_position():
+                        position = self.portfolio.get_position()
+                        self.logger.warning("⚠️ 재시도에서도 캔들 데이터 없음 - 다음 캔들까지 대기")
+                        self.notifier.send_system_status(
+                            "warning",
+                            f"캔들 데이터 재시도 실패 - 포지션 보유 중\n"
+                            f"진입가: {position['entry_price']:,.0f} KRW | 수량: {position['amount']:.4f} XRP\n"
+                            f"다음 캔들({_next_time_str})에서 재시도합니다."
+                        )
+                    else:
+                        self.logger.warning("⚠️ 재시도에서도 캔들 데이터 없음 - 다음 캔들까지 대기")
+                        self.notifier.send_system_status(
+                            "warning",
+                            f"캔들 데이터 재시도 실패\n"
+                            f"다음 캔들({_next_time_str})에서 재시도합니다."
+                        )
                 else:
-                    self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 분석 건너뜀 (중복 알림 방지)")
-                    self.notifier.send_system_status(
-                        "warning",
-                        f"캔들 데이터 업데이트 실패 - 새로운 캔들 없음\n"
-                        f"다음 캔들({_next_time_str})에서 재시도합니다."
-                    )
+                    # 첫 실패 → 10분 후 재시도 예약
+                    if self.portfolio.has_position():
+                        position = self.portfolio.get_position()
+                        self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 포지션 보유 중, 10분 후 재시도 예약")
+                        self.notifier.send_system_status(
+                            "warning",
+                            f"캔들 데이터 업데이트 실패 - 포지션 보유 중\n"
+                            f"진입가: {position['entry_price']:,.0f} KRW | 수량: {position['amount']:.4f} XRP\n"
+                            f"10분 후 재시도합니다."
+                        )
+                    else:
+                        self.logger.warning("⚠️ 새로운 캔들 데이터 없음 - 10분 후 재시도 예약")
+                        self.notifier.send_system_status(
+                            "warning",
+                            f"캔들 데이터 업데이트 실패\n"
+                            f"10분 후 재시도합니다. (실패 시 다음 캔들: {_next_time_str})"
+                        )
+
+                    # 기존 타이머가 있으면 취소 후 새로 예약
+                    if self._candle_retry_timer and self._candle_retry_timer.is_alive():
+                        self._candle_retry_timer.cancel()
+                    self._candle_retry_timer = threading.Timer(600, self._retry_candle_fetch)
+                    self._candle_retry_timer.daemon = True
+                    self._candle_retry_timer.start()
+                    self.logger.info("⏰ 10분 후 캔들 데이터 재시도 예약됨")
+
                 return
+
+            # 데이터 수집 성공 시 잔존 타이머 취소
+            if self._candle_retry_timer and self._candle_retry_timer.is_alive():
+                self._candle_retry_timer.cancel()
+                self._candle_retry_timer = None
 
             # 2. 최신 캔들 조회
             self.logger.info("2️⃣ 최신 캔들 조회 중...")
@@ -502,12 +541,25 @@ class TradingBot:
                 self.logger.error(f"매도 실행 실패: {str(e)}")
                 self.notifier.send_error("SellError", str(e))
 
+    def _retry_candle_fetch(self):
+        """캔들 데이터 10분 후 재시도"""
+        self.logger.info("🔄 캔들 데이터 재시도 중... (10분 지연 후)")
+        if self.is_running and self._process_alive:
+            self.on_candle_close(is_retry=True)
+        else:
+            self.logger.info("매매 중지 또는 종료 상태 - 캔들 재시도 건너뜀")
+
     def shutdown(self):
         """시스템 종료"""
         self.logger.info("⏹️  시스템 종료 중...")
 
         self.is_running = False
         self._process_alive = False
+
+        # 캔들 재시도 타이머 취소
+        if self._candle_retry_timer and self._candle_retry_timer.is_alive():
+            self._candle_retry_timer.cancel()
+            self.logger.info("캔들 재시도 타이머 취소됨")
 
         # 텔레그램 폴링 정지
         self.notifier.stop_polling()
