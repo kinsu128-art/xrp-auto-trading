@@ -6,6 +6,8 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import time
 
+import requests
+
 from bithumb_api import BithumbAPI, BithumbAPIError
 from data_storage import DataStorage
 
@@ -166,6 +168,13 @@ class DataCollector:
                             time.sleep(2)
                         else:
                             raise
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                        self.logger.warning(f"네트워크 오류 (시도 {attempt + 1}/{max_retries}): {type(e).__name__}: {str(e)}")
+                        if attempt < max_retries - 1:
+                            time.sleep(5)
+                        else:
+                            self.logger.error(f"네트워크 오류로 캔들 데이터 수집 실패: {str(e)}")
+                            return 0
 
                 if new_candles:
                     # 현재 형성 중인 봉 제거 (마감되지 않은 불완전 데이터)
@@ -190,7 +199,13 @@ class DataCollector:
             return 0
 
         except BithumbAPIError as e:
-            self.logger.error(f"데이터 업데이트 실패: {str(e)}")
+            self.logger.error(f"데이터 업데이트 실패 (API 오류): {str(e)}")
+            return 0
+        except (requests.exceptions.RequestException, OSError) as e:
+            self.logger.error(f"데이터 업데이트 실패 (네트워크 오류): {type(e).__name__}: {str(e)}")
+            return 0
+        except Exception as e:
+            self.logger.error(f"데이터 업데이트 실패 (예기치 않은 오류): {type(e).__name__}: {str(e)}")
             return 0
 
     def get_current_candle(

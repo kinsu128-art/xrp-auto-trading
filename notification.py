@@ -41,53 +41,52 @@ class TelegramNotifier:
         # 명령어 콜백 (TradingBot에서 등록)
         self._command_callbacks = {}
 
-    def _send_message(
-        self,
-        message: str,
-        parse_mode: Optional[str] = None
-    ) -> bool:
+    def _send_message(self, message: str) -> bool:
         """
-        텔레그램 메시지 전송 (Markdown 실패 시 plain text 폴백)
+        텔레그램 메시지 전송 (네트워크 실패 시 최대 3회 재시도, 반복문 방식)
 
         Args:
             message: 메시지 내용
-            parse_mode: 파싱 모드 (Markdown, HTML)
 
         Returns:
             전송 성공 여부
         """
+        max_retries = 3
         url = f"{self.api_url}/sendMessage"
         data = {
             "chat_id": self.chat_id,
             "text": message
         }
 
-        if parse_mode:
-            data["parse_mode"] = parse_mode
+        for attempt in range(max_retries + 1):
+            try:
+                response = requests.post(url, data=data, timeout=10)
+                response.raise_for_status()
 
-        try:
-            response = requests.post(url, data=data, timeout=10)
-            response.raise_for_status()
+                result = response.json()
+                if result.get("ok"):
+                    self.logger.debug(f"텔레그램 메시지 전송 성공: {message[:50]}...")
+                    return True
+                else:
+                    error_msg = result.get("description", "Unknown error")
+                    self.logger.error(f"텔레그램 메시지 전송 실패: {error_msg}")
+                    return False
 
-            result = response.json()
-            if result.get("ok"):
-                self.logger.debug(f"텔레그램 메시지 전송 성공: {message[:50]}...")
-                return True
-            else:
-                error_msg = result.get("description", "Unknown error")
-                # Markdown 파싱 에러 시 plain text로 재시도
-                if parse_mode and "parse" in error_msg.lower():
-                    self.logger.warning(f"Markdown 파싱 실패, plain text로 재시도: {error_msg}")
-                    return self._send_message(message, parse_mode=None)
-                self.logger.error(f"텔레그램 메시지 전송 실패: {error_msg}")
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if attempt < max_retries:
+                    wait = (attempt + 1) * 5  # 5초, 10초, 15초
+                    self.logger.warning(
+                        f"텔레그램 전송 실패 (재시도 {attempt + 1}/{max_retries}, {wait}초 후): {type(e).__name__}"
+                    )
+                    time.sleep(wait)
+                else:
+                    self.logger.error(f"텔레그램 전송 최종 실패 ({max_retries}회 재시도 소진): {str(e)}")
+                    return False
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"텔레그램 요청 실패: {str(e)}")
                 return False
 
-        except requests.exceptions.Timeout:
-            self.logger.error("텔레그램 요청 타임아웃")
-            return False
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"텔레그램 요청 실패: {str(e)}")
-            return False
+        return False
 
     def send_buy_signal(
         self,
@@ -110,7 +109,7 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        message = f"""📥 **매수 신호**
+        message = f"""📥 매수 신호
 
 💰 코인: {currency}
 📈 매수 가격: {price:.2f} KRW
@@ -123,7 +122,7 @@ class TelegramNotifier:
         if avg_close is not None:
             message += f"\n📊 5봉 종가 평균: {avg_close:.2f} KRW"
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def send_sell_signal(
         self,
@@ -151,7 +150,7 @@ class TelegramNotifier:
         profit_emoji = "📈" if profit > 0 else "📉"
         profit_color = profit_percent >= 0
 
-        message = f"""{profit_emoji} **매도 신호**
+        message = f"""{profit_emoji} 매도 신호
 
 💰 코인: {currency}
 📉 매도 가격: {price:.2f} KRW
@@ -161,7 +160,7 @@ class TelegramNotifier:
 ⏰ 보유 시간: {duration_hours:.1f}시간
 🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def send_balance(
         self,
@@ -182,7 +181,7 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        message = f"""💼 **잔고 현황**
+        message = f"""💼 잔고 현황
 
 💵 KRW 잔고: {krw_balance:,.0f} KRW
 🪙 {coin_symbol} 잔고: {coin_balance:.8f}"""
@@ -195,7 +194,7 @@ class TelegramNotifier:
 
         message += f"\n\n🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def send_error(
         self,
@@ -214,18 +213,18 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        message = f"""⚠️ **에러 발생**
+        message = f"""⚠️ 에러 발생
 
 ❌ 에러 타입: {error_type}
 📝 에러 메시지: {error_message}
 🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
 
         if context:
-            message += "\n\n**추가 정보:**"
+            message += "\n\n추가 정보:"
             for key, value in context.items():
                 message += f"\n• {key}: {value}"
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def send_backtest_summary(
         self,
@@ -242,7 +241,7 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        message = f"""📊 **백테스트 요약**
+        message = f"""📊 백테스트 요약
 
 📈 총 수익률: {metrics['total_return_percent']:+.2f}%
 📅 연간 수익률: {metrics['annualized_return']:+.2f}%
@@ -256,7 +255,7 @@ class TelegramNotifier:
 
 🕐 생성 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def send_system_status(
         self,
@@ -280,12 +279,12 @@ class TelegramNotifier:
             "warning": "⚠️"
         }.get(status, "ℹ️")
 
-        message = f"""{status_emoji} **시스템 상태**
+        message = f"""{status_emoji} 시스템 상태
 
 {status.upper()}: {message}
 🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def send_candle_fetch_failed(
         self,
@@ -325,6 +324,36 @@ class TelegramNotifier:
 
         return self._send_message(message)
 
+    def send_fallback_executed(
+        self,
+        action: str,
+        current_price: float,
+        profit_percent: float,
+        next_time: str
+    ) -> bool:
+        """
+        캔들 수집 실패 폴백 판단 결과 알림
+
+        Args:
+            action: 실행된 조치 (예: "매도 실행", "포지션 유지")
+            current_price: 현재 시세
+            profit_percent: 현재 수익률
+            next_time: 다음 캔들 시각 (HH:MM)
+
+        Returns:
+            전송 성공 여부
+        """
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        emoji = "🔴" if "매도" in action else "🟢"
+        message = (
+            f"📊 캔들 수집 실패 - 폴백 판단 실행\n"
+            f"🕐 {now_str}\n"
+            f"{emoji} 결과: {action}\n"
+            f"현재가: {current_price:,.0f} KRW | 수익률: {profit_percent:+.2f}%\n"
+            f"다음 정규 캔들: {next_time}"
+        )
+        return self._send_message(message)
+
     def send_daily_report(
         self,
         trades: list,
@@ -342,20 +371,20 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        message = f"""📈 **일간 리포트**
+        message = f"""📈 일간 리포트
 
 💵 총 수익: {total_pnl:+,.0f} KRW ({total_pnl_percent:+.2f}%)
 🔄 거래 횟수: {len(trades)}회
 🕐 기간: {datetime.now().strftime('%Y-%m-%d')}"""
 
         if trades:
-            message += "\n\n**거래 내역:**"
+            message += "\n\n거래 내역:"
             for i, trade in enumerate(trades, 1):
                 profit_emoji = "✅" if trade['profit'] > 0 else "❌"
                 message += f"""
 {profit_emoji} {i}회: {trade['profit_percent']:+.2f}% ({trade['profit']:+,.0f} KRW)"""
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     def test_connection(self) -> bool:
         """
@@ -364,13 +393,13 @@ class TelegramNotifier:
         Returns:
             연결 성공 여부
         """
-        message = f"""✅ **테스트 메시지**
+        message = f"""✅ 테스트 메시지
 
 XRP 자동매매 시스템이 성공적으로 텔레그램에 연결되었습니다.
 
 🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
 
-        return self._send_message(message, parse_mode="Markdown")
+        return self._send_message(message)
 
     # ─── 텔레그램 명령어 수신 (폴링) ───
 
@@ -407,15 +436,26 @@ XRP 자동매매 시스템이 성공적으로 텔레그램에 연결되었습니
         self.logger.info("텔레그램 폴링 스레드 정지")
 
     def _polling_loop(self):
-        """getUpdates 폴링 루프 (데몬 스레드에서 실행)"""
+        """getUpdates 폴링 루프 (데몬 스레드에서 실행, 에러 시 지수 백오프)"""
+        consecutive_errors = 0
         while self._polling:
             try:
                 updates = self._get_updates()
                 for update in updates:
                     self._handle_update(update)
+                consecutive_errors = 0  # 성공 시 리셋
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"텔레그램 폴링 네트워크 오류: {e}")
+                consecutive_errors += 1
+                # 지수 백오프: 3초, 6초, 12초, ... 최대 120초
+                backoff = min(3 * (2 ** (consecutive_errors - 1)), 120)
+                if consecutive_errors <= 3 or consecutive_errors % 10 == 0:
+                    self.logger.error(
+                        f"텔레그램 폴링 네트워크 오류 (연속 {consecutive_errors}회, {backoff}초 대기): {e}"
+                    )
+                time.sleep(backoff)
+                continue
             except Exception as e:
+                consecutive_errors += 1
                 self.logger.error(f"텔레그램 폴링 오류: {e}", exc_info=True)
 
             time.sleep(3)

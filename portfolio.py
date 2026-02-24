@@ -3,11 +3,6 @@
 """
 import logging
 from typing import Dict, Optional, Tuple, Any
-from decimal import Decimal, getcontext
-
-
-# 정밀도 설정
-getcontext().prec = 8
 
 
 class PortfolioError(Exception):

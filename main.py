@@ -109,6 +109,8 @@ class TradingBot:
         self.last_candle_timestamp = 0
         self._candle_retry_timer = None  # 캔들 데이터 재시도 타이머
         self._candle_retry_count = 0    # 캔들 재시도 횟수 (최대 6회)
+        self._candle_processing = False  # 캔들 처리 중 플래그 (중복 실행 방지)
+        self._candle_lock = threading.Lock()  # 캔들 처리 스레드 안전 보장
 
         # 일일 거래 기록
         self.daily_trades = []
@@ -284,6 +286,20 @@ class TradingBot:
         Args:
             is_retry: 재시도 여부 (True이면 실패 시 추가 재시도 예약 안 함)
         """
+        # 중복 실행 방지: 재시도와 정규 스케줄이 동시에 호출될 경우 (스레드 안전)
+        with self._candle_lock:
+            if self._candle_processing:
+                self.logger.warning("⚠️ 캔들 마감 처리가 이미 진행 중 - 중복 호출 무시")
+                return
+            self._candle_processing = True
+
+        # 정규 스케줄 호출 시 잔존 재시도 타이머 취소 (M-2)
+        if not is_retry:
+            if self._candle_retry_timer and self._candle_retry_timer.is_alive():
+                self._candle_retry_timer.cancel()
+                self._candle_retry_timer = None
+                self.logger.info("⏰ 정규 캔들 마감 시작 - 잔존 재시도 타이머 취소됨")
+
         try:
             self.logger.info("=" * 50)
             self.logger.info(f"🕐 캔들 마감 처리 시작: {datetime.now()}")
@@ -317,15 +333,20 @@ class TradingBot:
                 if is_retry:
                     self._candle_retry_count += 1
                     if self._candle_retry_count >= _max_retries:
-                        # 최대 재시도 초과 → 다음 캔들까지 대기
+                        # 최대 재시도 초과 → 포지션 보유 시 폴백 판단, 아니면 다음 캔들 대기
                         self.logger.warning(
-                            f"⚠️ 캔들 데이터 없음 - 최대 재시도 {_max_retries}회 초과, 다음 캔들까지 대기"
+                            f"⚠️ 캔들 데이터 없음 - 최대 재시도 {_max_retries}회 초과"
                         )
-                        self.notifier.send_candle_fetch_failed(
-                            is_retry=True,
-                            next_time=_next_time_str,
-                            position=position
-                        )
+                        if position:
+                            self.logger.info("📊 포지션 보유 중 - 기존 캔들 데이터로 폴백 판단 실행")
+                            self._fallback_with_existing_data(position, _next_time_str)
+                        else:
+                            self.logger.info("포지션 없음 - 다음 캔들까지 대기")
+                            self.notifier.send_candle_fetch_failed(
+                                is_retry=True,
+                                next_time=_next_time_str,
+                                position=None
+                            )
                     else:
                         # 재시도 횟수 남음 → 10분 후 다시 예약 (텔레그램 알림 없음)
                         self.logger.warning(
@@ -421,6 +442,9 @@ class TradingBot:
         except Exception as e:
             self.logger.error(f"❌ 캔들 마감 처리 에러: {str(e)}", exc_info=True)
             self.notifier.send_error("CandleCloseError", str(e))
+        finally:
+            with self._candle_lock:
+                self._candle_processing = False
 
     def _check_buy_signal(self, candles: list):
         """
@@ -610,6 +634,80 @@ class TradingBot:
 
         self.logger.warning("주문 체결 상세 조회 실패 - 폴백 값 사용")
         return fallback_amount, fallback_price
+
+    def _fallback_with_existing_data(self, position: dict, next_time_str: str):
+        """
+        캔들 데이터 수집 실패 시 기존 데이터 + 현재가로 폴백 매도 판단
+
+        포지션 보유 중 캔들 데이터를 가져올 수 없을 때,
+        마지막 저장된 캔들과 현재 시세를 활용하여 손절/익절 판단만 수행한다.
+        (매수는 하지 않음 - 불완전한 데이터로 새 포지션 진입은 위험)
+        """
+        try:
+            self.logger.info("📊 폴백 판단 시작: 기존 캔들 + 현재가 기반")
+
+            # 기존 저장된 캔들 로드
+            candles = self.storage.load_candles(limit=10)
+            if len(candles) < 6:
+                self.logger.warning("폴백 판단 불가 - 저장된 캔들 데이터 부족")
+                self.notifier.send_candle_fetch_failed(
+                    is_retry=True,
+                    next_time=next_time_str,
+                    position=position
+                )
+                return
+
+            # 현재가 조회
+            ticker = self.api.get_ticker(
+                order_currency=self.config.ORDER_CURRENCY,
+                payment_currency=self.config.TRADING_CURRENCY
+            )
+            current_price = float(ticker.get("closing_price", 0))
+
+            if current_price <= 0:
+                self.logger.warning("폴백 판단 불가 - 현재가 조회 실패")
+                self.notifier.send_candle_fetch_failed(
+                    is_retry=True,
+                    next_time=next_time_str,
+                    position=position
+                )
+                return
+
+            entry_price = position.get("entry_price", 0)
+            profit_percent = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+
+            self.logger.info(
+                f"폴백 현재가: {current_price:,.0f} | 진입가: {entry_price:,.0f} | 수익률: {profit_percent:+.2f}%"
+            )
+
+            # 매도 신호 확인 (기존 캔들 데이터 기반)
+            sell_signal = self.strategy.check_sell_signal(candles, position)
+
+            if sell_signal["should_sell"]:
+                self.logger.info("🔴 폴백 판단: 매도 신호 발생 - 매도 실행")
+                self._check_sell_position(candles)
+                self.notifier.send_fallback_executed(
+                    action="매도 실행",
+                    current_price=current_price,
+                    profit_percent=profit_percent,
+                    next_time=next_time_str
+                )
+            else:
+                self.logger.info("🟢 폴백 판단: 매도 신호 없음 - 포지션 유지")
+                self.notifier.send_fallback_executed(
+                    action="포지션 유지",
+                    current_price=current_price,
+                    profit_percent=profit_percent,
+                    next_time=next_time_str
+                )
+
+        except Exception as e:
+            self.logger.error(f"폴백 판단 중 에러: {str(e)}", exc_info=True)
+            self.notifier.send_candle_fetch_failed(
+                is_retry=True,
+                next_time=next_time_str,
+                position=position
+            )
 
     def _retry_candle_fetch(self):
         """캔들 데이터 재시도 (10분 간격, 최대 6회)"""

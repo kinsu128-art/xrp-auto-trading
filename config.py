@@ -66,4 +66,26 @@ def validate_config(config: Config) -> bool:
         print("   .env 파일에 TELEGRAM_BOT_TOKEN과 TELEGRAM_CHAT_ID를 설정하세요.")
         return False
 
+    # CANDLE_PERIOD 형식 검증 (예: "6h", "1d", "12h")
+    period = config.CANDLE_PERIOD
+    if not period or len(period) < 2:
+        print(f"⚠️  경고: CANDLE_PERIOD 형식이 잘못되었습니다: '{period}'")
+        print("   '6h', '12h', '1d' 형식으로 설정하세요.")
+        return False
+
+    unit = period[-1]
+    try:
+        value = int(period[:-1])
+        if value <= 0:
+            raise ValueError
+    except ValueError:
+        print(f"⚠️  경고: CANDLE_PERIOD 형식이 잘못되었습니다: '{period}'")
+        print("   '6h', '12h', '1d' 형식으로 설정하세요.")
+        return False
+
+    if unit not in ("h", "d"):
+        print(f"⚠️  경고: CANDLE_PERIOD 단위가 잘못되었습니다: '{unit}'")
+        print("   시간(h) 또는 일(d) 단위만 지원합니다.")
+        return False
+
     return True
