@@ -583,7 +583,7 @@ def fetch_candles_batch(self, start_date, end_date, batch_size=100):
         batch = self.api.get_candlestick(
             order_currency="XRP",
             payment_currency="KRW",
-            chart_intervals="4h",
+            chart_intervals="6h",
             count=min(batch_size, 100)
         )
         candles.extend(batch)
