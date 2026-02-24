@@ -13,6 +13,24 @@ from data_storage import DataStorage
 class DataCollector:
     """데이터 수집기 클래스"""
 
+    @staticmethod
+    def _interval_ms(chart_intervals: str) -> int:
+        """차트 간격 문자열을 밀리초로 변환 (예: '6h' → 21600000)"""
+        unit = chart_intervals[-1]
+        value = int(chart_intervals[:-1])
+        return value * {"h": 3600, "m": 60, "d": 86400}.get(unit, 3600) * 1000
+
+    @staticmethod
+    def _filter_forming(candles: List[Dict], chart_intervals: str) -> List[Dict]:
+        """현재 형성 중인(아직 마감되지 않은) 캔들을 제거한다.
+
+        빗썸 캔들 API는 현재 진행 중인 봉도 함께 반환한다.
+        이 봉은 일부 데이터만 포함하므로 DB에 저장하지 않는다.
+        """
+        interval_ms = DataCollector._interval_ms(chart_intervals)
+        current_period_start = (int(time.time() * 1000) // interval_ms) * interval_ms
+        return [c for c in candles if c["timestamp"] < current_period_start]
+
     def __init__(self, api: BithumbAPI, storage: DataStorage, logger: Optional[logging.Logger] = None):
         """
         데이터 수집기 초기화
@@ -61,6 +79,12 @@ class DataCollector:
 
             if not candles:
                 self.logger.warning("수집된 캔들 데이터가 없습니다.")
+                return 0
+
+            # 현재 형성 중인 봉 제거 (마감되지 않은 불완전 데이터)
+            candles = self._filter_forming(candles, chart_intervals)
+            if not candles:
+                self.logger.warning("형성 중인 봉 제외 후 저장할 캔들이 없습니다.")
                 return 0
 
             # 데이터 저장
@@ -142,6 +166,14 @@ class DataCollector:
                             time.sleep(2)
                         else:
                             raise
+
+                if new_candles:
+                    # 현재 형성 중인 봉 제거 (마감되지 않은 불완전 데이터)
+                    completed = self._filter_forming(new_candles, chart_intervals)
+                    forming_count = len(new_candles) - len(completed)
+                    if forming_count > 0:
+                        self.logger.debug(f"형성 중인 봉 {forming_count}개 제외 (미마감)")
+                    new_candles = completed
 
                 if new_candles:
                     # 데이터 저장
