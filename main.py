@@ -785,6 +785,8 @@ def main():
         print("📥 데이터 수집 모드")
         bot.data_collector.fetch_initial_data(
             order_currency=config.ORDER_CURRENCY,
+            payment_currency=config.TRADING_CURRENCY,
+            chart_intervals=config.CANDLE_PERIOD,
             days=args.days
         )
 
