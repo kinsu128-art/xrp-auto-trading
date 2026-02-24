@@ -137,7 +137,7 @@ class LarryWilliamsStrategy(StrategyEngine):
         """
         래리 윌리엄스 매도 조건 확인
 
-        조건: 매수 후 다음 4시간 봉 시가에 매도
+        조건: 매수 후 다음 6시간 봉 시가에 매도
 
         Args:
             candles: 캔들 데이터 리스트
@@ -187,7 +187,7 @@ class LarryWilliamsStrategy(StrategyEngine):
         return {
             "should_sell": should_sell,
             "sell_price": sell_price,
-            "reason": "다음 4시간 봉 시가"
+            "reason": "다음 6시간 봉 시가"
         }
 
     def _calculate_breakthrough_price(self, prev_candle: Dict, current_candle: Dict) -> float:
@@ -283,6 +283,6 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "전봉 거래량 < 현재봉 거래량"
             ],
             "sell_conditions": [
-                "매수 후 다음 4시간 봉 시가에 매도"
+                "매수 후 다음 6시간 봉 시가에 매도"
             ]
         }

@@ -30,7 +30,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "4h",
+        chart_intervals: str = "6h",
         days: int = 365
     ) -> int:
         """
@@ -47,8 +47,8 @@ class DataCollector:
         """
         self.logger.info(f"{order_currency} 과거 데이터 수집 시작... ({days}일)")
 
-        # 필요한 캔들 개수 계산 (1일 = 6개의 4시간 봉)
-        count = days * 6 + 10  # 여유분 추가
+        # 필요한 캔들 개수 계산 (1일 = 4개의 6시간 봉)
+        count = days * 4 + 10  # 여유분 추가
 
         try:
             # API에서 캔들 데이터 수집
@@ -85,7 +85,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "4h"
+        chart_intervals: str = "6h"
     ) -> int:
         """
         실시간 데이터 업데이트
@@ -165,7 +165,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "4h"
+        chart_intervals: str = "6h"
     ) -> Optional[Dict]:
         """
         현재 봉 데이터 조회
@@ -254,7 +254,7 @@ class DataCollector:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "4h"
+        chart_intervals: str = "6h"
     ) -> Optional[Dict]:
         """
         마감된 최신 캔들 조회

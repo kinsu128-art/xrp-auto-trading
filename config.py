@@ -25,7 +25,7 @@ class Config:
 
     # 전략 설정
     BREAKTHROUGH_RATIO = float(os.getenv("BREAKTHROUGH_RATIO", "0.5"))
-    CANDLE_PERIOD = os.getenv("CANDLE_PERIOD", "4h")
+    CANDLE_PERIOD = os.getenv("CANDLE_PERIOD", "6h")
     NUM_CANDLES_FOR_AVG = int(os.getenv("NUM_CANDLES_FOR_AVG", "5"))
 
     # 로깅 설정

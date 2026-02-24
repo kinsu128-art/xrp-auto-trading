@@ -137,7 +137,7 @@ class BithumbAPI:
         self,
         order_currency: str = "XRP",
         payment_currency: str = "KRW",
-        chart_intervals: str = "4h",
+        chart_intervals: str = "6h",
         count: int = 100
     ) -> List[Dict]:
         """
@@ -146,7 +146,7 @@ class BithumbAPI:
         Args:
             order_currency: 주문 통화 (예: XRP)
             payment_currency: 결제 통화 (예: KRW)
-            chart_intervals: 차트 간격 (예: 4h)
+            chart_intervals: 차트 간격 (예: 6h)
             count: 가져올 캔들 개수
 
         Returns:
