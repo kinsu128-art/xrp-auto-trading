@@ -24,7 +24,7 @@
 - 📊 **백테스트**: 과거 데이터로 전략 검증
 - 📈 **시각화**: 차트 및 HTML 리포트 생성
 - 🔔 **텔레그램 제어**: 매수/매도/에러 알림 + 명령어로 봇 제어 (`/start`, `/stop`, `/status`, `/balance`)
-- 🏪 **빗썸 API**: 빗썸 거래소와 연동
+- 🏪 **빗썸 API**: 빗썸 거래소와 연동 (JWT HS256 인증)
 - 💾 **데이터 관리**: SQLite를 이용한 캔들 데이터 저장
 
 ---
@@ -117,9 +117,10 @@ docker compose up -d --build
 | `TRADING_CURRENCY` | 결제 통화 | `KRW` |
 | `ORDER_CURRENCY` | 주문 통화 | `XRP` |
 | `BREAKTHROUGH_RATIO` | 돌파 배율 | `0.5` |
-| `CANDLE_PERIOD` | 캔들 주기 | `4h` |
+| `CANDLE_PERIOD` | 캔들 주기 | `6h` |
 | `NUM_CANDLES_FOR_AVG` | 평균 계산 봉 수 | `5` |
 | `LOG_LEVEL` | 로그 레벨 | `INFO` |
+| `LOG_RETENTION_DAYS` | 로그 보관 일수 | `7` |
 | `DATABASE_PATH` | DB 파일 경로 | `data/candles.db` |
 | `MAX_RETRIES` | API 재시도 횟수 | `3` |
 | `RETRY_DELAY` | 재시도 간격(초) | `1` |
@@ -294,7 +295,7 @@ python main.py --mode live
 
 ### 래리 윌리엄스 돌파 전략
 
-4시간 봉 기준으로 동작하는 단기 매매 전략입니다.
+6시간 봉 기준으로 동작하는 단기 매매 전략입니다.
 
 #### 매수 조건 (3가지 모두 충족 시)
 
@@ -316,12 +317,12 @@ python main.py --mode live
 #### 매도 조건
 
 ```
-매수 후 다음 4시간 봉 시가에 매도
+매수 후 다음 6시간 봉 시가에 매도
 ```
 
 #### 스케줄
 
-한국시간 기준 **00:00, 04:00, 08:00, 12:00, 16:00, 20:00** 에 캔들 마감 체크 및 매매 실행
+한국시간 기준 **00:00, 06:00, 12:00, 18:00** 에 캔들 마감 체크 및 매매 실행
 
 ---
 
@@ -339,10 +340,10 @@ xrp-auto-trading/
 ├── __init__.py               # 패키지 초기화
 ├── main.py                   # 메인 실행 파일 (TradingBot + 텔레그램 명령 핸들러)
 ├── config.py                 # 설정 관리 (환경 변수 기반)
-├── bithumb_api.py            # 빗썸 API 클라이언트 (HMAC-SHA512)
+├── bithumb_api.py            # 빗썸 API 클라이언트 (JWT HS256 인증)
 ├── strategy_engine.py        # 래리 윌리엄스 전략 엔진
 ├── order_executor.py         # 주문 실행기 (재시도 포함)
-├── data_collector.py         # 캔들 데이터 수집기
+├── data_collector.py         # 캔들 데이터 수집기 (forming candle 자동 제외)
 ├── data_storage.py           # SQLite 데이터 저장소
 ├── portfolio.py              # 포트폴리오/포지션 관리
 ├── notification.py           # 텔레그램 알림 및 명령어 수신 (폴링)
@@ -390,5 +391,5 @@ xrp-auto-trading/
 
 ---
 
-**버전**: 1.0.0
-**최종 업데이트**: 2026-02-14
+**버전**: 1.1.0
+**최종 업데이트**: 2026-02-24
