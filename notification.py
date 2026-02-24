@@ -47,7 +47,7 @@ class TelegramNotifier:
         parse_mode: Optional[str] = None
     ) -> bool:
         """
-        텔레그램 메시지 전송
+        텔레그램 메시지 전송 (Markdown 실패 시 plain text 폴백)
 
         Args:
             message: 메시지 내용
@@ -75,6 +75,10 @@ class TelegramNotifier:
                 return True
             else:
                 error_msg = result.get("description", "Unknown error")
+                # Markdown 파싱 에러 시 plain text로 재시도
+                if parse_mode and "parse" in error_msg.lower():
+                    self.logger.warning(f"Markdown 파싱 실패, plain text로 재시도: {error_msg}")
+                    return self._send_message(message, parse_mode=None)
                 self.logger.error(f"텔레그램 메시지 전송 실패: {error_msg}")
                 return False
 

@@ -58,8 +58,11 @@ class BacktestResult:
         total_return = self.final_capital - self.initial_capital
         total_return_percent = (total_return / self.initial_capital) * 100
 
-        # 연간 수익률 계산
-        days = len(self.trades) / 4  # 6시간 봉 기준 (4봉/일)
+        # 연간 수익률 계산 (첫 거래 ~ 마지막 거래의 실제 기간 사용)
+        first_trade_time = self.trades[0]["entry_time"]
+        last_trade_time = self.trades[-1]["exit_time"]
+        duration = (last_trade_time - first_trade_time).total_seconds()
+        days = duration / 86400 if duration > 0 else 0
         if days > 0:
             annualized_return = ((self.final_capital / self.initial_capital) ** (365 / days) - 1) * 100
         else:

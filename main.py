@@ -84,11 +84,12 @@ class TradingBot:
             retry_delay=config.RETRY_DELAY
         )
 
-        # 포트폴리오
+        # 포트폴리오 (storage 연동으로 포지션 영속화)
         self.portfolio = Portfolio(
             order_currency=config.ORDER_CURRENCY,
             payment_currency=config.TRADING_CURRENCY,
-            logger=self.logger
+            logger=self.logger,
+            storage=self.storage
         )
 
         # 알림 시스템
@@ -239,20 +240,34 @@ class TradingBot:
             self.notifier.send_error("CriticalError", str(e))
             self.shutdown()
 
+    def _parse_candle_interval_hours(self) -> int:
+        """CANDLE_PERIOD 설정을 시간 단위 정수로 변환 (예: '6h' → 6)"""
+        period = self.config.CANDLE_PERIOD
+        unit = period[-1]
+        value = int(period[:-1])
+        if unit == "h":
+            return value
+        elif unit == "d":
+            return value * 24
+        return value
+
     def setup_scheduler(self):
         """
-        스케줄러 설정 (6시간 봉 마감 + 일일 로그 정리)
+        스케줄러 설정 (CANDLE_PERIOD 기반 동적 봉 마감 + 일일 로그 정리)
         """
-        # 6시간 봉 마감 시간대: 한국시간 00:00, 06:00, 12:00, 18:00
-        schedule.every().day.at("00:00").do(self.on_candle_close)
-        schedule.every().day.at("06:00").do(self.on_candle_close)
-        schedule.every().day.at("12:00").do(self.on_candle_close)
-        schedule.every().day.at("18:00").do(self.on_candle_close)
+        interval_hours = self._parse_candle_interval_hours()
+        candle_hours = list(range(0, 24, interval_hours))
+        schedule_times = []
+
+        for h in candle_hours:
+            time_str = f"{h:02d}:00"
+            schedule.every().day.at(time_str).do(self.on_candle_close)
+            schedule_times.append(time_str)
 
         # 매일 03:00에 오래된 로그 정리
         schedule.every().day.at("03:00").do(self.cleanup_logs)
 
-        self.logger.info("📅 스케줄러 설정 완료 (00:00, 06:00, 12:00, 18:00 / 로그 정리 03:00)")
+        self.logger.info(f"📅 스케줄러 설정 완료 ({', '.join(schedule_times)} / 로그 정리 03:00)")
 
     def cleanup_logs(self):
         """오래된 로그 파일 정리"""
@@ -283,12 +298,13 @@ class TradingBot:
             self.logger.info(f"   {updated_count}개 캔들 업데이트 완료")
 
             if updated_count == 0:
-                # 다음 캔들 시간 계산
+                # 다음 캔들 시간 계산 (CANDLE_PERIOD 기반 동적 생성)
                 _now = datetime.now()
-                _candle_hours = [0, 4, 8, 12, 16, 20]
+                _interval_hours = self._parse_candle_interval_hours()
+                _candle_hours = list(range(0, 24, _interval_hours))
                 _next_hour = next((h for h in _candle_hours if h > _now.hour), None)
                 if _next_hour is None:
-                    _next_dt = (_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                    _next_dt = (_now + timedelta(days=1)).replace(hour=_candle_hours[0], minute=0, second=0, microsecond=0)
                 else:
                     _next_dt = _now.replace(hour=_next_hour, minute=0, second=0, microsecond=0)
                 _next_time_str = _next_dt.strftime('%H:%M')
@@ -382,10 +398,20 @@ class TradingBot:
             total_value = self.portfolio.get_total_value(current_price)
             self.trade_logger.log_balance(krw_balance, coin_balance, total_value)
 
-            # 4. 포지션 확인 및 매도 처리
+            # 4. 포지션 확인 및 매도 → 매수 처리
             if self.portfolio.has_position():
                 self.logger.info("4️⃣ 포지션 매도 확인 중...")
                 self._check_sell_position(candles)
+
+                # 매도 후 잔고 재조회하여 같은 캔들에서 매수 신호 확인
+                if not self.portfolio.has_position():
+                    self.logger.info("5️⃣ 매도 완료 → 매수 신호 확인 중...")
+                    time.sleep(3)
+                    balance_after_sell = self.order_executor.get_balance()
+                    krw_after = float(balance_after_sell.get(f"available_{self.config.TRADING_CURRENCY.lower()}", 0))
+                    coin_after = float(balance_after_sell.get(f"available_{self.config.ORDER_CURRENCY.lower()}", 0))
+                    self.portfolio.update_balance(krw_after, coin_after)
+                    self._check_buy_signal(candles)
             else:
                 self.logger.info("4️⃣ 매수 신호 확인 중...")
                 self._check_buy_signal(candles)
@@ -424,31 +450,15 @@ class TradingBot:
                 order_krw = amount * buy_signal["breakthrough_price"]
                 self.logger.info(f"📥 매수 실행: {order_krw:,.0f} KRW (기준선: {buy_signal['breakthrough_price']:.2f})")
 
-                # 매수 전 코인 잔고 저장
-                coin_balance_before = self.portfolio.coin_balance
-
                 result = self.order_executor.market_buy(
                     order_currency=self.config.ORDER_CURRENCY,
                     amount_krw=order_krw
                 )
 
-                # 체결 반영 대기 후 잔고 재조회
-                import time as _time
-                _time.sleep(3)
-                balance_after = self.order_executor.get_balance()
-                coin_balance_after = float(balance_after.get(
-                    f"available_{self.config.ORDER_CURRENCY.lower()}", 0
-                ))
-                actual_amount = coin_balance_after - coin_balance_before
-
-                if actual_amount <= 0:
-                    self.logger.warning(
-                        f"⚠️ 실제 체결 수량 확인 불가 (잔고 차이: {actual_amount:.8f}), 계산값 사용"
-                    )
-                    actual_amount = amount
-
-                # 실제 체결 단가 계산
-                actual_price = order_krw / actual_amount
+                # 주문 UUID로 체결 내역 조회
+                actual_amount, actual_price = self._get_filled_order_info(
+                    result, fallback_amount=amount, fallback_price=buy_signal["breakthrough_price"]
+                )
 
                 self.logger.info(f"✅ 체결 확인: {actual_amount:.8f} XRP @ {actual_price:.2f} KRW")
 
@@ -460,8 +470,13 @@ class TradingBot:
                 )
 
                 # 잔고 업데이트
+                time.sleep(2)
+                balance_after = self.order_executor.get_balance()
                 krw_balance_after = float(balance_after.get(
                     f"available_{self.config.TRADING_CURRENCY.lower()}", 0
+                ))
+                coin_balance_after = float(balance_after.get(
+                    f"available_{self.config.ORDER_CURRENCY.lower()}", 0
                 ))
                 self.portfolio.update_balance(krw_balance_after, coin_balance_after)
 
@@ -546,6 +561,55 @@ class TradingBot:
             except Exception as e:
                 self.logger.error(f"매도 실행 실패: {str(e)}")
                 self.notifier.send_error("SellError", str(e))
+
+    def _get_filled_order_info(self, order_result: dict, fallback_amount: float, fallback_price: float, max_wait: int = 5):
+        """
+        주문 UUID로 체결 수량/단가를 조회한다.
+
+        Args:
+            order_result: market_buy/market_sell 반환값
+            fallback_amount: 조회 실패 시 사용할 수량
+            fallback_price: 조회 실패 시 사용할 가격
+            max_wait: 최대 폴링 횟수 (2초 간격)
+
+        Returns:
+            (actual_amount, actual_price) 튜플
+        """
+        order_uuid = None
+        if isinstance(order_result, dict):
+            order_uuid = order_result.get("uuid")
+
+        if not order_uuid:
+            self.logger.warning("주문 UUID 없음 - 폴백 값 사용")
+            return fallback_amount, fallback_price
+
+        for attempt in range(max_wait):
+            try:
+                time.sleep(2)
+                detail = self.api.get_order_detail(order_uuid)
+
+                state = detail.get("state", "")
+                trades = detail.get("trades", [])
+
+                if state in ("done", "cancel") and trades:
+                    total_volume = sum(float(t.get("volume", 0)) for t in trades)
+                    total_funds = sum(float(t.get("funds", 0)) for t in trades)
+
+                    if total_volume > 0 and total_funds > 0:
+                        avg_price = total_funds / total_volume
+                        self.logger.info(f"📋 주문 체결 조회 성공: {total_volume:.8f} @ {avg_price:.2f}")
+                        return total_volume, avg_price
+
+                if state == "done":
+                    break
+
+                self.logger.debug(f"주문 상태: {state} (시도 {attempt + 1}/{max_wait})")
+
+            except Exception as e:
+                self.logger.warning(f"주문 체결 조회 실패 (시도 {attempt + 1}): {e}")
+
+        self.logger.warning("주문 체결 상세 조회 실패 - 폴백 값 사용")
+        return fallback_amount, fallback_price
 
     def _retry_candle_fetch(self):
         """캔들 데이터 재시도 (10분 간격, 최대 6회)"""

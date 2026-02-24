@@ -2,6 +2,7 @@
 데이터 저장소 모듈
 """
 import sqlite3
+import threading
 import pandas as pd
 from typing import List, Optional, Dict
 from datetime import datetime
@@ -19,6 +20,7 @@ class DataStorage:
             db_path: 데이터베이스 파일 경로
         """
         self.db_path = db_path
+        self._lock = threading.Lock()
 
         # 데이터베이스 디렉토리 생성
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -28,7 +30,7 @@ class DataStorage:
 
     def _create_tables(self):
         """데이터베이스 테이블 생성"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             # 캔들 데이터 테이블
@@ -42,6 +44,24 @@ class DataStorage:
                     close REAL NOT NULL,
                     volume REAL NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 포지션 테이블 (영속화용)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS position (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    amount REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    entry_time TEXT NOT NULL,
+                    entry_candle_timestamp INTEGER NOT NULL,
+                    entry_candle_open REAL NOT NULL,
+                    entry_candle_high REAL NOT NULL,
+                    entry_candle_low REAL NOT NULL,
+                    entry_candle_close REAL NOT NULL,
+                    entry_candle_volume REAL NOT NULL,
+                    position_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -69,7 +89,7 @@ class DataStorage:
 
         saved_count = 0
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             for candle in candles:
@@ -131,7 +151,7 @@ class DataStorage:
         else:
             query += " ORDER BY timestamp ASC"
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query, params)
             rows = cursor.fetchall()
@@ -168,7 +188,7 @@ class DataStorage:
             LIMIT 1
         """
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query)
             row = cursor.fetchone()
@@ -202,7 +222,7 @@ class DataStorage:
             ORDER BY timestamp ASC
         """
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query, (timestamp,))
             rows = cursor.fetchall()
@@ -239,7 +259,7 @@ class DataStorage:
             LIMIT ?
         """
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query, (timestamp, count))
             rows = cursor.fetchall()
@@ -292,7 +312,7 @@ class DataStorage:
 
         query = "DELETE FROM candles WHERE timestamp < ?"
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query, (cutoff_timestamp,))
             deleted_count = cursor.rowcount
@@ -309,7 +329,7 @@ class DataStorage:
         """
         query = "SELECT COUNT(*) FROM candles"
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query)
             count = cursor.fetchone()[0]
@@ -325,7 +345,7 @@ class DataStorage:
         """
         query = "SELECT MIN(timestamp), MAX(timestamp) FROM candles"
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._lock, sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(query)
             row = cursor.fetchone()
@@ -334,3 +354,96 @@ class DataStorage:
             return (0, 0)
 
         return (row[0], row[1])
+
+    # ─── 포지션 영속화 ───
+
+    def save_position(self, position: Dict, position_count: int) -> bool:
+        """
+        포지션 정보를 DB에 저장 (프로세스 재시작 시 복원용)
+
+        Args:
+            position: 포지션 정보 딕셔너리
+            position_count: 포지션 횟수
+
+        Returns:
+            저장 성공 여부
+        """
+        candle = position["entry_candle"]
+        entry_time_str = position["entry_time"].isoformat()
+
+        with self._lock, sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO position
+                (id, amount, entry_price, entry_time,
+                 entry_candle_timestamp, entry_candle_open, entry_candle_high,
+                 entry_candle_low, entry_candle_close, entry_candle_volume,
+                 position_count, updated_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                position["amount"],
+                position["entry_price"],
+                entry_time_str,
+                candle["timestamp"],
+                candle["open"],
+                candle["high"],
+                candle["low"],
+                candle["close"],
+                candle["volume"],
+                position_count
+            ))
+            conn.commit()
+
+        return True
+
+    def load_position(self) -> Optional[Dict]:
+        """
+        DB에서 포지션 정보를 복원
+
+        Returns:
+            포지션 정보 딕셔너리 (없으면 None)
+        """
+        query = """
+            SELECT amount, entry_price, entry_time,
+                   entry_candle_timestamp, entry_candle_open, entry_candle_high,
+                   entry_candle_low, entry_candle_close, entry_candle_volume,
+                   position_count
+            FROM position WHERE id = 1
+        """
+
+        with self._lock, sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(query)
+            row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "amount": row[0],
+            "entry_price": row[1],
+            "entry_time": datetime.fromisoformat(row[2]),
+            "entry_candle": {
+                "timestamp": row[3],
+                "open": row[4],
+                "high": row[5],
+                "low": row[6],
+                "close": row[7],
+                "volume": row[8]
+            },
+            "position_count": row[9]
+        }
+
+    def delete_position(self) -> bool:
+        """
+        DB에서 포지션 정보 삭제 (포지션 클로즈 시)
+
+        Returns:
+            삭제 성공 여부
+        """
+        with self._lock, sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM position WHERE id = 1")
+            conn.commit()
+
+        return True

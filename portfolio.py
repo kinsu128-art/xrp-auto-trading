@@ -25,7 +25,8 @@ class Portfolio:
         min_order_krw: float = 1000.0,  # 최소 주문 금액
         min_order_units: float = 0.001,  # 최소 주문 수량
         fee_rate: float = 0.0015,  # 수수료율 0.15%
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        storage=None
     ):
         """
         포트폴리오 초기화
@@ -37,6 +38,7 @@ class Portfolio:
             min_order_units: 최소 주문 수량
             fee_rate: 수수료율
             logger: 로거
+            storage: DataStorage 인스턴스 (포지션 영속화용)
         """
         self.order_currency = order_currency
         self.payment_currency = payment_currency
@@ -44,6 +46,7 @@ class Portfolio:
         self.min_order_units = min_order_units
         self.fee_rate = fee_rate
         self.logger = logger or logging.getLogger(__name__)
+        self.storage = storage
 
         # 잔고 초기화
         self.krw_balance = 0.0
@@ -52,6 +55,31 @@ class Portfolio:
         # 포지션 초기화
         self.position = None  # {"amount": float, "entry_price": float, "entry_time": datetime}
         self.position_count = 0  # 포지션 횟수
+
+        # DB에서 포지션 복원
+        self._restore_position()
+
+    def _restore_position(self):
+        """DB에서 포지션 정보 복원 (프로세스 재시작 시)"""
+        if not self.storage:
+            return
+
+        try:
+            saved = self.storage.load_position()
+            if saved:
+                self.position = {
+                    "amount": saved["amount"],
+                    "entry_price": saved["entry_price"],
+                    "entry_time": saved["entry_time"],
+                    "entry_candle": saved["entry_candle"]
+                }
+                self.position_count = saved["position_count"]
+                self.logger.info(
+                    f"📦 포지션 복원: {saved['amount']:.8f} @ {saved['entry_price']:.2f} "
+                    f"(진입: {saved['entry_time'].strftime('%m/%d %H:%M')})"
+                )
+        except Exception as e:
+            self.logger.error(f"포지션 복원 실패: {e}")
 
     def update_balance(self, krw_balance: float, coin_balance: float):
         """
@@ -207,6 +235,13 @@ class Portfolio:
         }
         self.position_count += 1
 
+        # DB에 포지션 영속화
+        if self.storage:
+            try:
+                self.storage.save_position(self.position, self.position_count)
+            except Exception as e:
+                self.logger.error(f"포지션 DB 저장 실패: {e}")
+
         self.logger.info(
             f"📥 포지션 오픈: 수량={amount:.8f}, "
             f"진입 가격={price:.2f}, 포지션 #{self.position_count}"
@@ -250,6 +285,13 @@ class Portfolio:
         }
 
         self.position = None
+
+        # DB에서 포지션 삭제
+        if self.storage:
+            try:
+                self.storage.delete_position()
+            except Exception as e:
+                self.logger.error(f"포지션 DB 삭제 실패: {e}")
 
         self.logger.info(
             f"📤 포지션 클로즈: 수익={profit:.0f} ({profit_percent:.2f}%), "
