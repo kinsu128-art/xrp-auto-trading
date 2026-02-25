@@ -95,7 +95,7 @@ class DataStorage:
             for candle in candles:
                 try:
                     cursor.execute("""
-                        INSERT OR IGNORE INTO candles
+                        INSERT OR REPLACE INTO candles
                         (timestamp, open, high, low, close, volume)
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, (
@@ -109,7 +109,6 @@ class DataStorage:
                     if cursor.rowcount > 0:
                         saved_count += 1
                 except sqlite3.IntegrityError:
-                    # 중복 데이터 무시
                     pass
 
             conn.commit()
