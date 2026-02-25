@@ -2,6 +2,7 @@
 빗썸 API 클라이언트 (v2 - JWT 인증)
 """
 import time
+import math
 import hashlib
 import uuid
 import json
@@ -309,12 +310,14 @@ class BithumbAPI:
         market = f"{payment_currency}-{order_currency}"
 
         if units:
-            # 수량 지정 시장가 매도
+            # 수량 지정 시장가 매도 (소수점 4자리로 버림 - API 주문 단위 제한)
+            volume = float(units)
+            truncated = math.floor(volume * 10000) / 10000
             params = {
                 "market": market,
                 "side": "ask",
                 "ord_type": "market",
-                "volume": str(units),
+                "volume": f"{truncated:.4f}",
             }
         elif price:
             # KRW 금액 지정 매도: 현재 시세로 수량 환산
