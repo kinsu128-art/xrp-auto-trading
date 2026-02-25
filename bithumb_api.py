@@ -99,6 +99,12 @@ class BithumbAPI:
 
             return data
 
+        except requests.exceptions.HTTPError as e:
+            try:
+                error_detail = response.json()
+            except Exception:
+                error_detail = response.text[:500]
+            raise BithumbAPIError(f"API 요청 실패: {str(e)} - 응답: {error_detail}")
         except requests.exceptions.RequestException as e:
             raise BithumbAPIError(f"API 요청 실패: {str(e)}")
 

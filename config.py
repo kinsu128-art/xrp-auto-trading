@@ -37,6 +37,9 @@ class Config:
     # API 설정
     BITHUMB_API_URL = os.getenv("BITHUMB_API_URL", "https://api.bithumb.com")
 
+    # 수수료 설정 (빗썸 기본 수수료 0.25%)
+    FEE_RATE = float(os.getenv("FEE_RATE", "0.0025"))
+
     # 재시도 설정
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
     RETRY_DELAY = int(os.getenv("RETRY_DELAY", "1"))  # 초

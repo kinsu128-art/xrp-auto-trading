@@ -88,6 +88,7 @@ class TradingBot:
         self.portfolio = Portfolio(
             order_currency=config.ORDER_CURRENCY,
             payment_currency=config.TRADING_CURRENCY,
+            fee_rate=config.FEE_RATE,
             logger=self.logger,
             storage=self.storage
         )

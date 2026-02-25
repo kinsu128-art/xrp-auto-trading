@@ -19,7 +19,7 @@ class Portfolio:
         payment_currency: str = "KRW",
         min_order_krw: float = 1000.0,  # 최소 주문 금액
         min_order_units: float = 0.001,  # 최소 주문 수량
-        fee_rate: float = 0.0015,  # 수수료율 0.15%
+        fee_rate: float = 0.0025,  # 수수료율 0.25% (빗썸 기본 수수료)
         logger: Optional[logging.Logger] = None,
         storage=None
     ):
