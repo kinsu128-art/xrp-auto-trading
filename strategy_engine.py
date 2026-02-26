@@ -61,7 +61,7 @@ class LarryWilliamsStrategy(StrategyEngine):
         래리 윌리엄스 매수 조건 확인
 
         조건 (3가지 모두 충족):
-        1. 현재봉 고가 > 시가 + (전봉 고가 - 전봉 저가) × 0.5
+        1. 현재봉 종가 > 시가 + (전봉 고가 - 전봉 저가) × 0.5
         2. 돌파 기준선 가격 > 최근 5봉 종가 평균
         3. 전봉 거래량 < 현재봉 거래량
 
@@ -98,8 +98,8 @@ class LarryWilliamsStrategy(StrategyEngine):
         conditions = {}
         reasons = []
 
-        # 조건 1: 돌파 기준선 돌파
-        condition1 = current_candle["high"] > breakthrough_price
+        # 조건 1: 돌파 기준선 돌파 (종가 기준)
+        condition1 = current_candle["close"] > breakthrough_price
         conditions["breakthrough"] = condition1
         if not condition1:
             reasons.append("돌파 기준선 미달")
@@ -296,7 +296,7 @@ class LarryWilliamsStrategy(StrategyEngine):
             "breakthrough_ratio": self.breakthrough_ratio,
             "num_candles_for_avg": self.num_candles_for_avg,
             "buy_conditions": [
-                f"현재봉 고가 > 시가 + (전봉 고가 - 전봉 저가) × {self.breakthrough_ratio}",
+                f"현재봉 종가 > 시가 + (전봉 고가 - 전봉 저가) × {self.breakthrough_ratio}",
                 f"돌파 기준선 가격 > 최근 {self.num_candles_for_avg}봉 종가 평균",
                 "전봉 거래량 < 현재봉 거래량"
             ],
