@@ -167,6 +167,43 @@ class TelegramNotifier:
 
         return self._send_message(message)
 
+    def send_hold_signal(
+        self,
+        currency: str,
+        amount: float,
+        entry_price: float,
+        current_price: float,
+        duration_hours: float
+    ) -> bool:
+        """
+        포지션 보유 알림 전송 (매수 조건 유지 중)
+
+        Args:
+            currency: 코인 심볼
+            amount: 보유 수량
+            entry_price: 진입 가격
+            current_price: 현재 가격
+            duration_hours: 보유 시간 (시간)
+
+        Returns:
+            전송 성공 여부
+        """
+        unrealized_profit = (current_price - entry_price) * amount
+        unrealized_percent = (current_price - entry_price) / entry_price * 100
+        profit_emoji = "📈" if unrealized_profit >= 0 else "📉"
+
+        message = f"""🔒 포지션 보유 중 (매수 조건 유지)
+
+💰 코인: {currency}
+📥 진입 가격: {entry_price:.2f} KRW
+💹 현재 가격: {current_price:.2f} KRW
+📊 보유 수량: {amount:.8f}
+{profit_emoji} 미실현 손익: {unrealized_profit:+,.0f} KRW ({unrealized_percent:+.2f}%)
+⏰ 보유 시간: {duration_hours:.1f}시간
+🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        return self._send_message(message)
+
     def send_balance(
         self,
         krw_balance: float,

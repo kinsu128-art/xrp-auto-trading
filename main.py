@@ -588,6 +588,25 @@ class TradingBot:
                 self.logger.error(f"매도 실행 실패: {str(e)}")
                 self.notifier.send_error("SellError", str(e))
 
+        else:
+            # 매수 조건 유지 중 - 포지션 보유 알림
+            current_candle = candles[-1]
+            current_price = current_candle["close"]
+            entry_price = position.get("entry_price", 0)
+            entry_time = position.get("entry_time")
+            duration_hours = 0
+            if entry_time:
+                from datetime import datetime
+                duration_hours = (datetime.now() - entry_time).total_seconds() / 3600
+
+            self.notifier.send_hold_signal(
+                currency=self.config.ORDER_CURRENCY,
+                amount=position["amount"],
+                entry_price=entry_price,
+                current_price=current_price,
+                duration_hours=duration_hours
+            )
+
     def _get_filled_order_info(self, order_result: dict, fallback_amount: float, fallback_price: float, max_wait: int = 5):
         """
         주문 UUID로 체결 수량/단가를 조회한다.
