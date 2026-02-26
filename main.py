@@ -420,7 +420,29 @@ class TradingBot:
             total_value = self.portfolio.get_total_value(current_price)
             self.trade_logger.log_balance(krw_balance, coin_balance, total_value)
 
-            # 4. 포지션 확인 및 매도 → 매수 처리
+            # 4. 포지션 유실 안전장치: 포지션 없지만 코인 잔고가 유의미하면 복구
+            if not self.portfolio.has_position() and coin_balance > 0 and current_price > 0:
+                coin_value_krw = coin_balance * current_price
+                if coin_value_krw >= self.portfolio.min_order_krw:
+                    self.logger.warning(
+                        f"⚠️ 포지션 유실 감지: 포지션 없으나 {self.config.ORDER_CURRENCY} "
+                        f"{coin_balance:.4f}개 보유 ({coin_value_krw:,.0f} KRW) → 포지션 자동 복구"
+                    )
+                    self.portfolio.open_position(
+                        amount=coin_balance,
+                        price=current_price,
+                        candle=latest_candle
+                    )
+                    self.notifier._send_message(
+                        f"[포지션 자동 복구]\n"
+                        f"포지션 데이터 유실 감지\n"
+                        f"코인 잔고 기반 복구 완료\n\n"
+                        f"수량: {coin_balance:.4f} {self.config.ORDER_CURRENCY}\n"
+                        f"현재가 기준: {current_price:,.0f} KRW\n"
+                        f"평가금액: {coin_value_krw:,.0f} KRW"
+                    )
+
+            # 5. 포지션 확인 및 매도 → 매수 처리
             if self.portfolio.has_position():
                 self.logger.info("4️⃣ 포지션 매도 확인 중...")
                 self._check_sell_position(candles)
