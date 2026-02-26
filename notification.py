@@ -131,7 +131,8 @@ class TelegramNotifier:
         price: float,
         profit: float,
         profit_percent: float,
-        duration_hours: float
+        duration_hours: float,
+        reason: Optional[str] = None
     ) -> bool:
         """
         매도 알림 전송
@@ -143,6 +144,7 @@ class TelegramNotifier:
             profit: 수익 (KRW)
             profit_percent: 수익률 (%)
             duration_hours: 보유 시간 (시간)
+            reason: 매도 사유 (예: "돌파 기준선 미달, 거래량 감소")
 
         Returns:
             전송 성공 여부
@@ -159,6 +161,9 @@ class TelegramNotifier:
 {'✅' if profit_color else '❌'} 수익: {profit:+,.0f} KRW ({profit_percent:+.2f}%)
 ⏰ 보유 시간: {duration_hours:.1f}시간
 🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        if reason:
+            message += f"\n\n📋 매도 사유: {reason}"
 
         return self._send_message(message)
 

@@ -566,7 +566,8 @@ class TradingBot:
                     price=sell_signal["sell_price"],
                     profit=position_info["profit"],
                     profit_percent=position_info["profit_percent"],
-                    duration_hours=position_info.get("duration_hours", 0)
+                    duration_hours=position_info.get("duration_hours", 0),
+                    reason=sell_signal.get("reason")
                 )
 
                 self.trade_logger.log_sell(
