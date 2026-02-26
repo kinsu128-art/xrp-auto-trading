@@ -177,11 +177,19 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "아직 매수 캔들 마감 안됨"
             }
 
-        # 현재 캔들 기준으로 매수 조건 재평가
+        # 현재 캔들 기준으로 매수 조건 재평가 (거래량 조건 제외)
         buy_signal = self.check_buy_signal(candles)
+        conditions = buy_signal.get("conditions", {})
 
-        if buy_signal["should_buy"]:
-            # 매수 조건 여전히 충족 → 포지션 유지
+        # 매도 판단에서 거래량 조건(volume_increase)은 제외
+        # 조건 1(breakthrough) + 조건 2(above_avg) 중 하나라도 미충족 시 매도
+        hold_conditions = {
+            k: v for k, v in conditions.items() if k != "volume_increase"
+        }
+        should_hold = all(hold_conditions.values()) if hold_conditions else False
+
+        if should_hold:
+            # 핵심 조건 유지 → 포지션 보유 계속
             self.logger.info("📊 매수 조건 유지 중 - 포지션 보유 계속")
             return {
                 "should_sell": False,
@@ -189,9 +197,9 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "매수 조건 유지 중"
             }
         else:
-            # 매수 조건 미충족 → 매도
+            # 핵심 조건 미충족 → 매도 (거래량 조건 제외한 실패 사유)
             sell_price = current_candle["open"]
-            failed_reasons = buy_signal.get("reasons", [])
+            failed_reasons = [r for r in buy_signal.get("reasons", []) if "거래량" not in r]
             reason_str = ", ".join(failed_reasons) if failed_reasons else "매수 조건 미충족"
             self.logger.info(f"📤 매도 신호 발생! 사유: {reason_str}, 매도 가격: {sell_price:.2f}")
             return {
