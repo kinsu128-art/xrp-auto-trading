@@ -1,7 +1,9 @@
 """
 포트폴리오 관리 모듈
 """
+import json
 import logging
+import os
 from typing import Dict, Optional, Tuple, Any
 
 
@@ -51,11 +53,16 @@ class Portfolio:
         self.position = None  # {"amount": float, "entry_price": float, "entry_time": datetime}
         self.position_count = 0  # 포지션 횟수
 
+        # 포지션 백업 파일 경로
+        self._position_backup_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data", "position_backup.json"
+        )
+
         # DB에서 포지션 복원
         self._restore_position()
 
     def _restore_position(self):
-        """DB에서 포지션 정보 복원 (프로세스 재시작 시)"""
+        """DB에서 포지션 정보 복원 (프로세스 재시작 시), 실패 시 JSON 백업에서 복원"""
         if not self.storage:
             return
 
@@ -70,11 +77,73 @@ class Portfolio:
                 }
                 self.position_count = saved["position_count"]
                 self.logger.info(
-                    f"📦 포지션 복원: {saved['amount']:.8f} @ {saved['entry_price']:.2f} "
+                    f"📦 포지션 복원 (DB): {saved['amount']:.8f} @ {saved['entry_price']:.2f} "
                     f"(진입: {saved['entry_time'].strftime('%m/%d %H:%M')})"
                 )
+                # DB 복원 성공 시 JSON 백업도 갱신
+                self._save_position_backup()
+                return
         except Exception as e:
-            self.logger.error(f"포지션 복원 실패: {e}")
+            self.logger.error(f"포지션 DB 복원 실패: {e}")
+
+        # DB에 포지션 없으면 JSON 백업에서 복원 시도
+        self._restore_from_backup()
+
+    def _restore_from_backup(self):
+        """JSON 백업 파일에서 포지션 복원"""
+        try:
+            if not os.path.exists(self._position_backup_path):
+                return
+
+            with open(self._position_backup_path, "r") as f:
+                backup = json.load(f)
+
+            from datetime import datetime
+            self.position = {
+                "amount": backup["amount"],
+                "entry_price": backup["entry_price"],
+                "entry_time": datetime.fromisoformat(backup["entry_time"]),
+                "entry_candle": backup["entry_candle"]
+            }
+            self.position_count = backup.get("position_count", 1)
+
+            # DB에도 다시 저장
+            if self.storage:
+                self.storage.save_position(self.position, self.position_count)
+
+            self.logger.warning(
+                f"📦 포지션 복원 (JSON 백업): {backup['amount']:.8f} @ {backup['entry_price']:.2f} "
+                f"(진입: {self.position['entry_time'].strftime('%m/%d %H:%M')})"
+            )
+        except Exception as e:
+            self.logger.error(f"포지션 JSON 백업 복원 실패: {e}")
+
+    def _save_position_backup(self):
+        """포지션을 JSON 파일로 백업"""
+        if not self.position:
+            return
+
+        try:
+            os.makedirs(os.path.dirname(self._position_backup_path), exist_ok=True)
+            backup = {
+                "amount": self.position["amount"],
+                "entry_price": self.position["entry_price"],
+                "entry_time": self.position["entry_time"].isoformat(),
+                "entry_candle": self.position["entry_candle"],
+                "position_count": self.position_count
+            }
+            with open(self._position_backup_path, "w") as f:
+                json.dump(backup, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"포지션 JSON 백업 저장 실패: {e}")
+
+    def _delete_position_backup(self):
+        """포지션 JSON 백업 파일 삭제"""
+        try:
+            if os.path.exists(self._position_backup_path):
+                os.remove(self._position_backup_path)
+        except Exception as e:
+            self.logger.error(f"포지션 JSON 백업 삭제 실패: {e}")
 
     def update_balance(self, krw_balance: float, coin_balance: float):
         """
@@ -237,6 +306,9 @@ class Portfolio:
             except Exception as e:
                 self.logger.error(f"포지션 DB 저장 실패: {e}")
 
+        # JSON 백업 저장
+        self._save_position_backup()
+
         self.logger.info(
             f"📥 포지션 오픈: 수량={amount:.8f}, "
             f"진입 가격={price:.2f}, 포지션 #{self.position_count}"
@@ -287,6 +359,9 @@ class Portfolio:
                 self.storage.delete_position()
             except Exception as e:
                 self.logger.error(f"포지션 DB 삭제 실패: {e}")
+
+        # JSON 백업 삭제
+        self._delete_position_backup()
 
         self.logger.info(
             f"📤 포지션 클로즈: 수익={profit:.0f} ({profit_percent:.2f}%), "

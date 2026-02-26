@@ -428,10 +428,12 @@ class TradingBot:
                         f"⚠️ 포지션 유실 감지: 포지션 없으나 {self.config.ORDER_CURRENCY} "
                         f"{coin_balance:.4f}개 보유 ({coin_value_krw:,.0f} KRW) → 포지션 자동 복구"
                     )
+                    # 이전 봉을 entry_candle로 사용 (현재 봉이면 매도 판단 스킵됨)
+                    recovery_candle = candles[-2] if len(candles) >= 2 else latest_candle
                     self.portfolio.open_position(
                         amount=coin_balance,
                         price=current_price,
-                        candle=latest_candle
+                        candle=recovery_candle
                     )
                     self.notifier._send_message(
                         f"[포지션 자동 복구]\n"
