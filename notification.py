@@ -332,7 +332,8 @@ class TelegramNotifier:
         self,
         is_retry: bool,
         next_time: str,
-        position: Optional[Dict] = None
+        position: Optional[Dict] = None,
+        currency: str = "XRP"
     ) -> bool:
         """
         캔들 데이터 수집 실패 알림
@@ -359,7 +360,7 @@ class TelegramNotifier:
             title += " [포지션 보유 중]"
             position_line = (
                 f"\n진입가: {position['entry_price']:,.0f} KRW"
-                f" | 수량: {position['amount']:.4f} XRP"
+                f" | 수량: {position['amount']:.4f} {currency}"
             )
 
         message = f"{title}\n🕐 {now_str}{position_line}\n{next_line}"

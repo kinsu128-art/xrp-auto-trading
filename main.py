@@ -346,7 +346,8 @@ class TradingBot:
                             self.notifier.send_candle_fetch_failed(
                                 is_retry=True,
                                 next_time=_next_time_str,
-                                position=None
+                                position=None,
+                                currency=self.config.ORDER_CURRENCY
                             )
                     else:
                         # 재시도 횟수 남음 → 10분 후 다시 예약 (텔레그램 알림 없음)
@@ -371,7 +372,8 @@ class TradingBot:
                     self.notifier.send_candle_fetch_failed(
                         is_retry=False,
                         next_time=_next_time_str,
-                        position=position
+                        position=position,
+                        currency=self.config.ORDER_CURRENCY
                     )
 
                     # 기존 타이머가 있으면 취소 후 새로 예약
@@ -484,10 +486,11 @@ class TradingBot:
         if buy_signal["should_buy"]:
             self.logger.info("✅ 매수 신호 발생!")
 
-            # 매수 수량 계산
+            # 매수 수량 계산 (종가 기준 - 실제 시장 체결가와 근접)
+            current_close = candles[-1]["close"]
             try:
                 amount, fee = self.portfolio.calculate_buy_amount(
-                    price=buy_signal["breakthrough_price"],
+                    price=current_close,
                     use_ratio=1.0  # 전체 자본 사용
                 )
             except Exception as e:
@@ -496,8 +499,8 @@ class TradingBot:
 
             # 매수 실행
             try:
-                order_krw = amount * buy_signal["breakthrough_price"]
-                self.logger.info(f"📥 매수 실행: {order_krw:,.0f} KRW (기준선: {buy_signal['breakthrough_price']:.2f})")
+                order_krw = amount * current_close
+                self.logger.info(f"📥 매수 실행: {order_krw:,.0f} KRW (종가: {current_close:.2f}, 기준선: {buy_signal['breakthrough_price']:.2f})")
 
                 result = self.order_executor.market_buy(
                     order_currency=self.config.ORDER_CURRENCY,
@@ -506,7 +509,7 @@ class TradingBot:
 
                 # 주문 UUID로 체결 내역 조회
                 actual_amount, actual_price = self._get_filled_order_info(
-                    result, fallback_amount=amount, fallback_price=buy_signal["breakthrough_price"]
+                    result, fallback_amount=amount, fallback_price=current_close
                 )
 
                 self.logger.info(f"✅ 체결 확인: {actual_amount:.8f} XRP @ {actual_price:.2f} KRW")
@@ -580,14 +583,20 @@ class TradingBot:
                     units=amount
                 )
 
-                # 포지션 클로즈
-                position_info = self.portfolio.close_position(sell_signal["sell_price"])
+                # 주문 UUID로 실제 체결가 조회
+                actual_amount, actual_price = self._get_filled_order_info(
+                    result, fallback_amount=amount, fallback_price=sell_signal["sell_price"]
+                )
+                self.logger.info(f"✅ 매도 체결 확인: {actual_amount:.8f} {self.config.ORDER_CURRENCY} @ {actual_price:.2f} KRW")
+
+                # 포지션 클로즈 (실제 체결가 기준)
+                position_info = self.portfolio.close_position(actual_price)
 
                 # 알림
                 self.notifier.send_sell_signal(
                     currency=self.config.ORDER_CURRENCY,
-                    amount=amount,
-                    price=sell_signal["sell_price"],
+                    amount=actual_amount,
+                    price=actual_price,
                     profit=position_info["profit"],
                     profit_percent=position_info["profit_percent"],
                     duration_hours=position_info.get("duration_hours", 0),
@@ -596,8 +605,8 @@ class TradingBot:
 
                 self.trade_logger.log_sell(
                     currency=self.config.ORDER_CURRENCY,
-                    amount=amount,
-                    price=sell_signal["sell_price"],
+                    amount=actual_amount,
+                    price=actual_price,
                     profit=position_info["profit"],
                     profit_percent=position_info["profit_percent"],
                     duration_hours=position_info.get("duration_hours", 0)
@@ -698,7 +707,8 @@ class TradingBot:
                 self.notifier.send_candle_fetch_failed(
                     is_retry=True,
                     next_time=next_time_str,
-                    position=position
+                    position=position,
+                    currency=self.config.ORDER_CURRENCY
                 )
                 return
 
@@ -714,7 +724,8 @@ class TradingBot:
                 self.notifier.send_candle_fetch_failed(
                     is_retry=True,
                     next_time=next_time_str,
-                    position=position
+                    position=position,
+                    currency=self.config.ORDER_CURRENCY
                 )
                 return
 
@@ -751,7 +762,8 @@ class TradingBot:
             self.notifier.send_candle_fetch_failed(
                 is_retry=True,
                 next_time=next_time_str,
-                position=position
+                position=position,
+                currency=self.config.ORDER_CURRENCY
             )
 
     def _retry_candle_fetch(self):
@@ -817,7 +829,7 @@ class TradingBot:
             msg = (
                 f"[{ts.strftime('%m/%d %H:%M')}] 매수 조건 분석\n\n"
                 f"[{mark(c1)}] 조건1: 돌파 기준선\n"
-                f"  고가({current['high']:,.0f}) {'>' if c1 else '<='} 기준선({bp:,.1f})\n"
+                f"  종가({current['close']:,.0f}) {'>' if c1 else '<='} 기준선({bp:,.1f})\n"
                 f"  기준선 = 시가({current['open']:,.0f}) + 변동폭({prev_range:,.0f}) x 0.5\n\n"
                 f"[{mark(c2)}] 조건2: 5봉 평균 상회\n"
                 f"  기준선({bp:,.1f}) {'>' if c2 else '<='} 평균({avg_close:,.1f})\n\n"
