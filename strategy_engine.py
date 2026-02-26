@@ -137,7 +137,8 @@ class LarryWilliamsStrategy(StrategyEngine):
         """
         래리 윌리엄스 매도 조건 확인
 
-        조건: 매수 후 다음 6시간 봉 시가에 매도
+        조건: 매수 조건(3가지)이 더 이상 충족되지 않을 때 매도
+              매수 조건이 계속 유지되는 동안은 포지션 보유 유지
 
         Args:
             candles: 캔들 데이터 리스트
@@ -158,19 +159,17 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "포지션 없음"
             }
 
-        # 다음 캔들 확인
         if len(candles) < 2:
             return {
                 "should_sell": False,
                 "sell_price": 0.0,
-                "reason": "다음 캔들 없음"
+                "reason": "캔들 데이터 부족"
             }
 
-        # 현재 캔들 (매수가 발생한 캔들)과 다음 캔들 확인
         buy_candle = position["entry_candle"]
         current_candle = candles[-1]
 
-        # 매수 후 첫 번째 마감 캔들인지 확인
+        # 매수 캔들이 아직 마감되지 않았으면 대기
         if current_candle["timestamp"] <= buy_candle["timestamp"]:
             return {
                 "should_sell": False,
@@ -178,17 +177,28 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "아직 매수 캔들 마감 안됨"
             }
 
-        # 다음 캔들의 시가에 매도
-        should_sell = True
-        sell_price = current_candle["open"]
+        # 현재 캔들 기준으로 매수 조건 재평가
+        buy_signal = self.check_buy_signal(candles)
 
-        self.logger.info(f"📤 매도 신호 발생! 매도 가격: {sell_price:.2f}")
-
-        return {
-            "should_sell": should_sell,
-            "sell_price": sell_price,
-            "reason": "다음 6시간 봉 시가"
-        }
+        if buy_signal["should_buy"]:
+            # 매수 조건 여전히 충족 → 포지션 유지
+            self.logger.info("📊 매수 조건 유지 중 - 포지션 보유 계속")
+            return {
+                "should_sell": False,
+                "sell_price": 0.0,
+                "reason": "매수 조건 유지 중"
+            }
+        else:
+            # 매수 조건 미충족 → 매도
+            sell_price = current_candle["open"]
+            failed_reasons = buy_signal.get("reasons", [])
+            reason_str = ", ".join(failed_reasons) if failed_reasons else "매수 조건 미충족"
+            self.logger.info(f"📤 매도 신호 발생! 사유: {reason_str}, 매도 가격: {sell_price:.2f}")
+            return {
+                "should_sell": True,
+                "sell_price": sell_price,
+                "reason": reason_str
+            }
 
     def _calculate_breakthrough_price(self, prev_candle: Dict, current_candle: Dict) -> float:
         """
@@ -283,6 +293,7 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "전봉 거래량 < 현재봉 거래량"
             ],
             "sell_conditions": [
-                "매수 후 다음 6시간 봉 시가에 매도"
+                "매수 조건 3가지 중 하나라도 미충족 시 매도",
+                "매수 조건 유지 중이면 포지션 보유 계속"
             ]
         }
