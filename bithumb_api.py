@@ -265,7 +265,7 @@ class BithumbAPI:
             params = {
                 "market": market,
                 "side": "bid",
-                "ord_type": "price",
+                "order_type": "price",
                 "price": str(price),
             }
         elif units:
@@ -276,7 +276,7 @@ class BithumbAPI:
             params = {
                 "market": market,
                 "side": "bid",
-                "ord_type": "price",
+                "order_type": "price",
                 "price": str(int(krw_amount)),
             }
         else:
@@ -306,44 +306,31 @@ class BithumbAPI:
 
         Returns:
             주문 결과
-
-        Note:
-            Bithumb v2 API의 ord_type="market" 매도 시 invalid_price_ask 오류 발생.
-            현재가 기준 5% 하한 지정가(limit)로 즉시 체결 처리.
-            XRP 호가 단위 = 1원 → int(price) 로 단위 맞춤.
         """
         market = f"{payment_currency}-{order_currency}"
 
-        # 현재 시세 조회 (호가 단위 맞추기 위해 필수)
-        ticker = self.get_ticker(order_currency, payment_currency)
-        current_price = float(ticker.get("closing_price", 0))
-        if current_price <= 0:
-            raise BithumbAPIError("현재가 조회 실패 - 매도 불가")
-
-        # XRP 호가 단위(1원) 맞추기: 정수로 버림
-        # 현재가의 95% 하한가 → 5% 슬리피지 허용으로 즉시 체결 보장
-        sell_price = max(1, int(current_price * 0.95))
-
         if units:
-            # 수량 지정 매도 (소수점 4자리 버림 - API 주문 단위 제한)
+            # 수량 지정 시장가 매도 (소수점 4자리 버림 - API 주문 단위 제한)
             volume = float(units)
             truncated = math.floor(volume * 10000) / 10000
             params = {
                 "market": market,
                 "side": "ask",
-                "ord_type": "limit",
-                "price": str(sell_price),
+                "order_type": "market",
                 "volume": f"{truncated:.4f}",
             }
         elif price:
             # KRW 금액 지정 매도: 현재 시세로 수량 환산
+            ticker = self.get_ticker(order_currency, payment_currency)
+            current_price = float(ticker.get("closing_price", 0))
+            if current_price <= 0:
+                raise BithumbAPIError("현재가 조회 실패 - 매도 불가")
             volume = float(price) / current_price
             truncated_vol = math.floor(volume * 10000) / 10000
             params = {
                 "market": market,
                 "side": "ask",
-                "ord_type": "limit",
-                "price": str(sell_price),
+                "order_type": "market",
                 "volume": f"{truncated_vol:.4f}",
             }
         else:
