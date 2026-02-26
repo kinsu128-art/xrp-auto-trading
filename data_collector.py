@@ -29,12 +29,15 @@ class DataCollector:
         빗썸 캔들 API는 현재 진행 중인 봉도 함께 반환한다.
         이 봉은 일부 데이터만 포함하므로 DB에 저장하지 않는다.
 
-        빗썸은 캔들 종료 시각을 타임스탬프로 사용한다.
-        - 완성된 봉: 타임스탬프(종료 시각) <= 현재 시각 → 저장
-        - 형성 중인 봉: 타임스탬프(종료 시각) > 현재 시각 → 제외
+        빗썸은 캔들 시작 시각(KST)을 타임스탬프로 사용한다.
+        형성 중인 봉의 시작 시각은 현재 UTC 구간 내에 속하므로
+        UTC 기준 현재 구간 시작 시각을 기준으로 필터링한다.
+        - timestamp < current_period_start → 완성된 봉 → 저장
+        - timestamp >= current_period_start → 형성 중인 봉 → 제외
         """
-        current_time_ms = int(time.time() * 1000)
-        return [c for c in candles if c["timestamp"] <= current_time_ms]
+        interval_ms = DataCollector._interval_ms(chart_intervals)
+        current_period_start = (int(time.time() * 1000) // interval_ms) * interval_ms
+        return [c for c in candles if c["timestamp"] < current_period_start]
 
     def __init__(self, api: BithumbAPI, storage: DataStorage, logger: Optional[logging.Logger] = None):
         """
