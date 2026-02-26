@@ -173,7 +173,7 @@ class TradingBot:
         backtester = Backtester(
             strategy=self.strategy,
             initial_capital=1000000.0,  # 100만 KRW
-            fee_rate=0.0015,  # 0.15% 수수료
+            fee_rate=self.config.FEE_RATE,  # config 기준 수수료 (기본 0.25%)
             logger=self.logger
         )
 
