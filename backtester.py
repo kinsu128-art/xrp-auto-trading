@@ -168,26 +168,33 @@ class Backtester:
             # 현재까지의 캔들 데이터
             current_candles = candles[:i+1]
 
-            # 매수 조건 확인 (포지션 없을 때만)
+            # 매수 조건 확인 (포지션 없을 때만) - 인트라데이 방식
             if position is None:
-                buy_signal = self.strategy.check_buy_signal(current_candles)
+                watch_info = self.strategy.get_intraday_watch_price(current_candles)
 
-                if buy_signal["should_buy"]:
-                    # 매수 실행
-                    buy_price = buy_signal["breakthrough_price"]
-                    buy_fee = capital * buy_fee_rate
-                    buy_amount = (capital - buy_fee) / buy_price
+                if watch_info["should_watch"] and i + 1 < len(candles):
+                    next_candle = candles[i + 1]
+                    breakthrough_price = watch_info["breakthrough_price"]
 
-                    position = {
-                        "entry_price": buy_price,
-                        "amount": buy_amount,
-                        "capital": capital,
-                        "entry_candle": candle,
-                        "entry_index": i,
-                        "entry_time": datetime.fromtimestamp(candle["timestamp"] / 1000)
-                    }
+                    # 다음 봉에서 돌파기준선 도달 여부 (고가 기준)
+                    if next_candle["high"] >= breakthrough_price:
+                        buy_price = breakthrough_price
+                        buy_fee = capital * buy_fee_rate
+                        buy_amount = (capital - buy_fee) / buy_price
 
-                    self.logger.debug(f"📥 매수: 가격 {buy_price:.2f}, 수량 {buy_amount:.4f}, 자본 {capital:.0f}")
+                        position = {
+                            "entry_price": buy_price,
+                            "amount": buy_amount,
+                            "capital": capital,
+                            "entry_candle": next_candle,   # 실제 체결된 봉
+                            "entry_index": i + 1,
+                            "entry_time": datetime.fromtimestamp(next_candle["timestamp"] / 1000)
+                        }
+
+                        self.logger.debug(
+                            f"📥 매수: 돌파기준선={buy_price:.2f}, "
+                            f"수량={buy_amount:.4f}, 자본={capital:.0f}"
+                        )
 
             # 매도 조건 확인 (포지션 있을 때만)
             else:

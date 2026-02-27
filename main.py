@@ -116,6 +116,14 @@ class TradingBot:
         # 일일 거래 기록
         self.daily_trades = []
 
+        # 지정가 주문 상태
+        self._pending_order_id: Optional[str] = None       # 대기 중인 지정가 주문 UUID
+        self._order_monitor_thread: Optional[threading.Thread] = None  # 체결 감시 스레드
+
+        # 인트라데이 감시 상태
+        self._intraday_target: Optional[float] = None   # 감시 중인 돌파기준선 (None이면 감시 안함)
+        self._intraday_period_ts: int = 0               # 감시 대상 봉의 시작 타임스탬프 (ms)
+
     def initialize(self) -> bool:
         """
         시스템 초기화
@@ -233,6 +241,7 @@ class TradingBot:
             while self._process_alive:
                 if self.is_running:
                     schedule.run_pending()
+                    self._check_intraday_breakthrough()  # 인트라데이 돌파 감시 (60초마다)
                 time.sleep(60)  # 1분마다 체크
 
         except KeyboardInterrupt:
@@ -403,6 +412,9 @@ class TradingBot:
             latest_candle = candles[-1]
             self.trade_logger.log_candle_close(latest_candle)
 
+            # 이전 캔들에서 미체결된 지정가 주문 취소
+            self._cancel_pending_order()
+
             # 3. 잔고 업데이트
             self.logger.info("3️⃣ 잔고 조회 중...")
             balance = self.order_executor.get_balance()
@@ -446,23 +458,27 @@ class TradingBot:
                         f"평가금액: {coin_value_krw:,.0f} KRW"
                     )
 
-            # 5. 포지션 확인 및 매도 → 매수 처리
+            # 5. 포지션 확인 및 매도 → 인트라데이 감시 설정
             if self.portfolio.has_position():
                 self.logger.info("4️⃣ 포지션 매도 확인 중...")
                 self._check_sell_position(candles)
 
-                # 매도 후 잔고 재조회하여 같은 캔들에서 매수 신호 확인
+                # 매도 후 잔고 재조회하여 같은 캔들에서 인트라데이 감시 설정
                 if not self.portfolio.has_position():
-                    self.logger.info("5️⃣ 매도 완료 → 매수 신호 확인 중...")
+                    self.logger.info("5️⃣ 매도 완료 → 인트라데이 감시 설정 중...")
                     time.sleep(3)
                     balance_after_sell = self.order_executor.get_balance()
                     krw_after = float(balance_after_sell.get(f"available_{self.config.TRADING_CURRENCY.lower()}", 0))
                     coin_after = float(balance_after_sell.get(f"available_{self.config.ORDER_CURRENCY.lower()}", 0))
                     self.portfolio.update_balance(krw_after, coin_after)
-                    self._check_buy_signal(candles)
+                    self._setup_intraday_monitoring(candles)
+                else:
+                    # 포지션 보유 중 → 인트라데이 감시 취소
+                    self._intraday_target = None
+                    self._intraday_period_ts = 0
             else:
-                self.logger.info("4️⃣ 매수 신호 확인 중...")
-                self._check_buy_signal(candles)
+                self.logger.info("4️⃣ 인트라데이 감시 설정 중...")
+                self._setup_intraday_monitoring(candles)
 
             self.logger.info("=" * 50)
 
@@ -475,86 +491,206 @@ class TradingBot:
 
     def _check_buy_signal(self, candles: list):
         """
-        매수 신호 확인 및 실행
+        매수 신호 확인 및 지정가 주문 실행
 
         Args:
             candles: 캔들 데이터
         """
+        # 이미 대기 중인 주문이 있으면 스킵
+        if self._pending_order_id:
+            self.logger.info(f"📋 대기 중인 지정가 주문 있음 - 매수 신호 확인 스킵")
+            return
+
         # 매수 조건 확인
         buy_signal = self.strategy.check_buy_signal(candles)
 
         if buy_signal["should_buy"]:
             self.logger.info("✅ 매수 신호 발생!")
 
-            # 매수 수량 계산 (종가 기준 - 실제 시장 체결가와 근접)
-            current_close = candles[-1]["close"]
+            breakthrough_price = buy_signal["breakthrough_price"]
+
+            # 지정가 기준 매수 수량 계산
             try:
                 amount, fee = self.portfolio.calculate_buy_amount(
-                    price=current_close,
-                    use_ratio=1.0  # 전체 자본 사용
+                    price=breakthrough_price,
+                    use_ratio=1.0
                 )
             except Exception as e:
                 self.logger.error(f"매수 수량 계산 실패: {str(e)}")
                 return
 
-            # 매수 실행
+            # 지정가 매수 주문 실행
             try:
-                order_krw = amount * current_close
-                self.logger.info(f"📥 매수 실행: {order_krw:,.0f} KRW (종가: {current_close:.2f}, 기준선: {buy_signal['breakthrough_price']:.2f})")
+                self.logger.info(
+                    f"📥 지정가 매수 주문: {breakthrough_price:,.2f} KRW x {amount:.4f} {self.config.ORDER_CURRENCY}"
+                )
 
-                result = self.order_executor.market_buy(
+                result = self.order_executor.limit_buy(
                     order_currency=self.config.ORDER_CURRENCY,
-                    amount_krw=order_krw
+                    price=breakthrough_price,
+                    units=amount
                 )
 
-                # 주문 UUID로 체결 내역 조회
-                actual_amount, actual_price = self._get_filled_order_info(
-                    result, fallback_amount=amount, fallback_price=current_close
-                )
+                order_id = result.get("uuid") if isinstance(result, dict) else None
 
-                self.logger.info(f"✅ 체결 확인: {actual_amount:.8f} XRP @ {actual_price:.2f} KRW")
+                if order_id:
+                    self._pending_order_id = order_id
+                    self._start_order_monitor(order_id, breakthrough_price, amount, candles[-1], buy_signal)
+                    self.logger.info(f"📡 주문 체결 감시 시작: {order_id[:8]}...")
+                else:
+                    self.logger.warning("주문 UUID 없음 - 체결 감시 불가")
 
-                # 포지션 오픈 (실제 체결 수량/가격 사용)
-                self.portfolio.open_position(
-                    amount=actual_amount,
-                    price=actual_price,
-                    candle=candles[-1]
-                )
-
-                # 잔고 업데이트
-                time.sleep(2)
-                balance_after = self.order_executor.get_balance()
-                krw_balance_after = float(balance_after.get(
-                    f"available_{self.config.TRADING_CURRENCY.lower()}", 0
-                ))
-                coin_balance_after = float(balance_after.get(
-                    f"available_{self.config.ORDER_CURRENCY.lower()}", 0
-                ))
-                self.portfolio.update_balance(krw_balance_after, coin_balance_after)
-
-                # 알림
-                self.notifier.send_buy_signal(
+                # 주문 접수 알림
+                self.notifier.send_limit_order_placed(
                     currency=self.config.ORDER_CURRENCY,
-                    amount=actual_amount,
-                    price=actual_price,
-                    breakthrough_price=buy_signal.get("breakthrough_price"),
+                    amount=amount,
+                    price=breakthrough_price,
+                    breakthrough_price=breakthrough_price,
                     avg_close=buy_signal.get("avg_close")
                 )
 
                 self.trade_logger.log_buy(
                     currency=self.config.ORDER_CURRENCY,
-                    amount=actual_amount,
-                    price=actual_price
+                    amount=amount,
+                    price=breakthrough_price
                 )
 
-                self.metrics_logger.log_trade()
-
             except Exception as e:
-                self.logger.error(f"매수 실행 실패: {str(e)}")
+                self.logger.error(f"매수 주문 실패: {str(e)}")
                 self.notifier.send_error("BuyError", str(e))
         else:
             self.logger.info(f"매수 조건 미충족: {', '.join(buy_signal.get('reasons', []))}")
             self._notify_buy_analysis(candles, buy_signal)
+
+    def _start_order_monitor(
+        self,
+        order_id: str,
+        breakthrough_price: float,
+        amount: float,
+        entry_candle: dict,
+        buy_signal: dict
+    ):
+        """지정가 매수 주문 체결 감시 스레드 시작"""
+        if self._order_monitor_thread and self._order_monitor_thread.is_alive():
+            self.logger.warning("이미 주문 감시 스레드가 실행 중")
+            return
+
+        self._order_monitor_thread = threading.Thread(
+            target=self._monitor_order_fill,
+            args=(order_id, breakthrough_price, amount, entry_candle, buy_signal),
+            name="OrderMonitor",
+            daemon=True
+        )
+        self._order_monitor_thread.start()
+
+    def _monitor_order_fill(
+        self,
+        order_id: str,
+        breakthrough_price: float,
+        amount: float,
+        entry_candle: dict,
+        buy_signal: dict
+    ):
+        """
+        주문 체결 감시 (백그라운드 스레드)
+        30초마다 체결 여부 확인, 체결 시 포지션 오픈 + 텔레그램 알림
+        """
+        check_interval = 60  # 60초마다 확인
+
+        while self._process_alive:
+            # 주문 ID가 변경(취소)되면 감시 중단
+            if self._pending_order_id != order_id:
+                self.logger.info(f"📡 주문 감시 중단: 주문 취소됨 ({order_id[:8]}...)")
+                return
+
+            try:
+                detail = self.api.get_order_detail(order_id)
+                state = detail.get("state", "")
+
+                if state == "done":
+                    # 체결 완료
+                    trades = detail.get("trades", [])
+                    if trades:
+                        total_volume = sum(float(t.get("volume", 0)) for t in trades)
+                        total_funds = sum(float(t.get("funds", 0)) for t in trades)
+                        actual_price = total_funds / total_volume if total_volume > 0 else breakthrough_price
+                        actual_amount = total_volume
+                    else:
+                        actual_amount = amount
+                        actual_price = breakthrough_price
+
+                    self.logger.info(
+                        f"✅ 지정가 매수 체결! {actual_amount:.4f} {self.config.ORDER_CURRENCY} @ {actual_price:,.2f} KRW"
+                    )
+
+                    # 감시 종료 표시
+                    self._pending_order_id = None
+
+                    # 포지션 오픈
+                    self.portfolio.open_position(
+                        amount=actual_amount,
+                        price=actual_price,
+                        candle=entry_candle
+                    )
+
+                    # 잔고 업데이트
+                    try:
+                        time.sleep(2)
+                        balance_after = self.order_executor.get_balance()
+                        krw_after = float(balance_after.get(
+                            f"available_{self.config.TRADING_CURRENCY.lower()}", 0
+                        ))
+                        coin_after = float(balance_after.get(
+                            f"available_{self.config.ORDER_CURRENCY.lower()}", 0
+                        ))
+                        self.portfolio.update_balance(krw_after, coin_after)
+                    except Exception:
+                        pass
+
+                    # 체결 알림
+                    self.notifier.send_buy_filled(
+                        currency=self.config.ORDER_CURRENCY,
+                        amount=actual_amount,
+                        price=actual_price,
+                        breakthrough_price=breakthrough_price,
+                        avg_close=buy_signal.get("avg_close")
+                    )
+
+                    self.metrics_logger.log_trade()
+                    return
+
+                elif state == "cancel":
+                    # 외부에서 취소됨
+                    self.logger.info(f"📡 주문 취소 확인: {order_id[:8]}...")
+                    self._pending_order_id = None
+                    return
+
+                self.logger.debug(f"주문 대기 중: {order_id[:8]}... (상태: {state})")
+
+            except Exception as e:
+                self.logger.warning(f"주문 체결 확인 오류: {e}")
+
+            time.sleep(check_interval)
+
+    def _cancel_pending_order(self):
+        """대기 중인 지정가 주문 취소 (다음 캔들 마감 시 호출)"""
+        if not self._pending_order_id:
+            return
+
+        order_id = self._pending_order_id
+        self._pending_order_id = None  # 먼저 초기화 → 감시 스레드 자동 중단
+
+        try:
+            self.order_executor.cancel_order(order_id)
+            self.logger.info(f"🚫 미체결 지정가 주문 취소 완료: {order_id[:8]}...")
+            self.notifier._send_message(
+                f"[주문 취소]\n"
+                f"지정가 매수 주문이 체결되지 않아 취소되었습니다.\n"
+                f"주문 ID: {order_id[:8]}...\n"
+                f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        except Exception as e:
+            self.logger.error(f"주문 취소 실패: {e}")
 
     def _check_sell_position(self, candles: list):
         """
@@ -781,6 +917,9 @@ class TradingBot:
         self.is_running = False
         self._process_alive = False
 
+        # 대기 중인 지정가 주문 취소
+        self._cancel_pending_order()
+
         # 캔들 재시도 타이머 취소
         if self._candle_retry_timer and self._candle_retry_timer.is_alive():
             self._candle_retry_timer.cancel()
@@ -798,7 +937,236 @@ class TradingBot:
         metrics_summary = self.metrics_logger.get_summary()
         self.logger.info(f"📊 메트릭 요약: {metrics_summary}")
 
-    # ─── 매수 조건 분석 알림 ───
+    # ─── 인트라데이 감시 ───
+
+    def _setup_intraday_monitoring(self, candles: list):
+        """
+        캔들 마감 후 다음 봉 인트라데이 감시 설정
+
+        조건 2&3이 모두 충족될 경우 감시를 시작하고,
+        미충족 시 조건 분석 알림을 전송한다.
+
+        Args:
+            candles: 최신 마감 캔들 데이터
+        """
+        # 이미 대기 중인 지정가 주문이 있으면 스킵
+        if self._pending_order_id:
+            self.logger.info("📋 대기 중인 지정가 주문 있음 - 인트라데이 감시 설정 스킵")
+            return
+
+        watch_info = self.strategy.get_intraday_watch_price(candles)
+        interval_ms = self._parse_candle_interval_hours() * 3600 * 1000
+
+        # 다음 봉 시작 타임스탬프 = 현재 마감봉 타임스탬프 + 인터벌
+        next_period_ts = candles[-1]["timestamp"] + interval_ms
+
+        if watch_info["should_watch"]:
+            self._intraday_target = watch_info["breakthrough_price"]
+            self._intraday_period_ts = next_period_ts
+
+            # 감시 만료 시각 계산 (다음 봉 마감 = 다음 봉 시작 + 인터벌)
+            period_end_dt = datetime.fromtimestamp((next_period_ts + interval_ms) / 1000)
+            period_end_str = period_end_dt.strftime('%H:%M')
+
+            self.logger.info(
+                f"👁 인트라데이 감시 시작: 돌파기준선={self._intraday_target:,.2f}, "
+                f"5봉평균={watch_info['avg_close']:,.2f}, 만료={period_end_str}"
+            )
+            self.notifier.send_intraday_watch_started(
+                currency=self.config.ORDER_CURRENCY,
+                breakthrough_price=self._intraday_target,
+                avg_close=watch_info["avg_close"],
+                period_end_time=period_end_str
+            )
+        else:
+            self._intraday_target = None
+            self._intraday_period_ts = 0
+
+            conditions = watch_info["conditions"]
+            reasons = []
+            if not conditions.get("above_avg"):
+                reasons.append(
+                    f"5봉평균 미달 (기준선={watch_info['breakthrough_price']:.2f} <= 평균={watch_info['avg_close']:.2f})"
+                )
+            if not conditions.get("volume_increase"):
+                reasons.append("거래량 감소")
+            self.logger.info(f"👁 인트라데이 감시 미설정: {', '.join(reasons)}")
+
+            self._notify_intraday_conditions_failed(candles, watch_info)
+
+    def _check_intraday_breakthrough(self):
+        """
+        매 60초 호출 - 현재가가 돌파기준선을 넘으면 즉시 지정가 매수
+
+        메인 루프(실전 모드)에서만 호출됨.
+        감시 중이 아니면 즉시 반환한다.
+        """
+        if self._intraday_target is None:
+            return
+
+        # 포지션 보유 or 대기 주문 있으면 감시 취소
+        if self.portfolio.has_position() or self._pending_order_id:
+            self._intraday_target = None
+            self._intraday_period_ts = 0
+            return
+
+        # 감시 기간 유효성 확인 (봉 마감 여부)
+        interval_ms = self._parse_candle_interval_hours() * 3600 * 1000
+        now_ms = int(time.time() * 1000)
+        period_end_ts = self._intraday_period_ts + interval_ms
+
+        if now_ms >= period_end_ts:
+            # 봉 마감 → 감시 만료 처리 (on_candle_close가 새 감시를 설정할 것)
+            self.logger.info(
+                f"⏰ 인트라데이 감시 만료 (돌파 없이 봉 마감): 기준선={self._intraday_target:,.2f}"
+            )
+            self.notifier.send_intraday_watch_expired(
+                currency=self.config.ORDER_CURRENCY,
+                breakthrough_price=self._intraday_target
+            )
+            self._intraday_target = None
+            self._intraday_period_ts = 0
+            return
+
+        # 현재가 조회
+        try:
+            ticker = self.api.get_ticker(
+                order_currency=self.config.ORDER_CURRENCY,
+                payment_currency=self.config.TRADING_CURRENCY
+            )
+            current_price = float(ticker.get("closing_price", 0))
+        except Exception as e:
+            self.logger.warning(f"인트라데이 감시 - 현재가 조회 실패: {e}")
+            return
+
+        if current_price <= 0:
+            return
+
+        self.logger.debug(
+            f"👁 인트라데이 감시 중: 현재가={current_price:,.2f}, 기준선={self._intraday_target:,.2f}"
+        )
+
+        # 돌파 감지!
+        if current_price >= self._intraday_target:
+            target = self._intraday_target
+            self._intraday_target = None   # 중복 매수 방지
+            self._intraday_period_ts = 0
+
+            self.logger.info(
+                f"🔥 인트라데이 돌파 감지! 현재가={current_price:,.2f} >= 기준선={target:,.2f}"
+            )
+
+            candles = self.storage.load_candles(limit=10)
+            if len(candles) >= 6:
+                self._execute_intraday_buy(candles, current_price, target)
+            else:
+                self.logger.warning("인트라데이 매수 불가 - 캔들 데이터 부족")
+
+    def _execute_intraday_buy(self, candles: list, current_price: float, breakthrough_price: float):
+        """
+        인트라데이 돌파 감지 후 즉시 지정가 매수 실행
+
+        Args:
+            candles: 최신 마감 캔들 데이터 (진입봉 정보 포함)
+            current_price: 돌파 감지 시점의 현재가
+            breakthrough_price: 돌파 기준선 가격 (지정가 주문 가격)
+        """
+        # 이미 대기 중인 주문이 있으면 스킵
+        if self._pending_order_id:
+            self.logger.warning("이미 대기 중인 지정가 주문 있음 - 인트라데이 매수 스킵")
+            return
+
+        # 지정가 기준 매수 수량 계산
+        try:
+            amount, fee = self.portfolio.calculate_buy_amount(
+                price=breakthrough_price,
+                use_ratio=1.0
+            )
+        except Exception as e:
+            self.logger.error(f"인트라데이 매수 수량 계산 실패: {str(e)}")
+            return
+
+        # 지정가 매수 주문 실행 (breakthrough_price에 지정가 주문)
+        try:
+            self.logger.info(
+                f"📥 인트라데이 지정가 매수: {breakthrough_price:,.2f} KRW x {amount:.4f} {self.config.ORDER_CURRENCY}"
+            )
+
+            result = self.order_executor.limit_buy(
+                order_currency=self.config.ORDER_CURRENCY,
+                price=breakthrough_price,
+                units=amount
+            )
+
+            order_id = result.get("uuid") if isinstance(result, dict) else None
+
+            # avg_close 재계산 (send_buy_filled용)
+            watch_info = self.strategy.get_intraday_watch_price(candles)
+
+            if order_id:
+                self._pending_order_id = order_id
+                self._start_order_monitor(order_id, breakthrough_price, amount, candles[-1], watch_info)
+                self.logger.info(f"📡 주문 체결 감시 시작: {order_id[:8]}...")
+            else:
+                self.logger.warning("주문 UUID 없음 - 체결 감시 불가")
+
+            # 주문 접수 알림
+            self.notifier.send_limit_order_placed(
+                currency=self.config.ORDER_CURRENCY,
+                amount=amount,
+                price=breakthrough_price,
+                breakthrough_price=breakthrough_price,
+                avg_close=watch_info.get("avg_close")
+            )
+
+            self.trade_logger.log_buy(
+                currency=self.config.ORDER_CURRENCY,
+                amount=amount,
+                price=breakthrough_price
+            )
+
+        except Exception as e:
+            self.logger.error(f"인트라데이 매수 주문 실패: {str(e)}")
+            self.notifier.send_error("IntradayBuyError", str(e))
+
+    def _notify_intraday_conditions_failed(self, candles: list, watch_info: dict):
+        """
+        인트라데이 감시 조건 미충족 시 분석 결과를 텔레그램으로 전송
+
+        Args:
+            candles: 캔들 데이터
+            watch_info: get_intraday_watch_price() 반환값
+        """
+        try:
+            current = candles[-1]
+            prev = candles[-2]
+            ts = datetime.fromtimestamp(current["timestamp"] / 1000)
+
+            conditions = watch_info.get("conditions", {})
+            bp = watch_info.get("breakthrough_price", 0)
+            avg_close = watch_info.get("avg_close", 0)
+
+            c2 = conditions.get("above_avg", False)
+            c3 = conditions.get("volume_increase", False)
+
+            mark = lambda v: "O" if v else "X"
+
+            msg = (
+                f"[{ts.strftime('%m/%d %H:%M')}] 인트라데이 감시 미설정\n\n"
+                f"[{mark(c2)}] 조건2: 5봉 평균 상회\n"
+                f"  기준선({bp:,.1f}) {'>' if c2 else '<='} 평균({avg_close:,.1f})\n\n"
+                f"[{mark(c3)}] 조건3: 거래량 증가\n"
+                f"  현재({current['volume']:,.0f}) {'>' if c3 else '<='} 전봉({prev['volume']:,.0f})\n\n"
+                f"돌파기준선: {bp:,.1f} KRW\n"
+                f"결과: 감시 미설정"
+            )
+
+            self.notifier._send_message(msg)
+
+        except Exception as e:
+            self.logger.error(f"인트라데이 조건 분석 알림 실패: {e}")
+
+    # ─── 매수 조건 분석 알림 (레거시) ───
 
     def _notify_buy_analysis(self, candles: list, buy_signal: dict):
         """

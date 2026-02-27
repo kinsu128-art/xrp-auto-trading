@@ -84,6 +84,8 @@ class BithumbAPI:
         try:
             if method.upper() == "GET":
                 response = self.session.get(url, params=params, headers=headers, timeout=10)
+            elif method.upper() == "DELETE":
+                response = self.session.delete(url, params=params, headers=headers, timeout=10)
             else:
                 headers["Content-Type"] = "application/json"
                 response = self.session.post(url, json=params, headers=headers, timeout=10)
@@ -341,6 +343,60 @@ class BithumbAPI:
             return result
         except Exception as e:
             raise BithumbAPIError(f"시장가 매도 실패: {str(e)}")
+
+    def limit_buy(
+        self,
+        order_currency: str,
+        payment_currency: str = "KRW",
+        price: float = 0.0,
+        volume: float = 0.0
+    ) -> Dict:
+        """
+        지정가 매수 (v2 API: POST /v2/orders)
+
+        Args:
+            order_currency: 주문 통화 (예: XRP)
+            payment_currency: 결제 통화 (예: KRW)
+            price: 지정가 (KRW)
+            volume: 매수 수량
+
+        Returns:
+            주문 결과
+        """
+        market = f"{payment_currency}-{order_currency}"
+        truncated = math.floor(volume * 10000) / 10000  # 소수점 4자리 버림
+
+        params = {
+            "market": market,
+            "side": "bid",
+            "order_type": "limit",
+            "price": str(int(price)),
+            "volume": f"{truncated:.4f}",
+        }
+
+        try:
+            result = self._private_request("POST", "/v2/orders", params)
+            return result
+        except Exception as e:
+            raise BithumbAPIError(f"지정가 매수 실패: {str(e)}")
+
+    def cancel_order(self, order_id: str) -> Dict:
+        """
+        주문 취소 (v2 API: DELETE /v1/order)
+
+        Args:
+            order_id: 주문 UUID
+
+        Returns:
+            취소 결과
+        """
+        params = {"uuid": order_id}
+
+        try:
+            result = self._private_request("DELETE", "/v1/order", params)
+            return result
+        except Exception as e:
+            raise BithumbAPIError(f"주문 취소 실패: {str(e)}")
 
     def get_order_detail(self, order_id: str, order_currency: str = "") -> Dict:
         """

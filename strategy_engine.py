@@ -137,8 +137,8 @@ class LarryWilliamsStrategy(StrategyEngine):
         """
         래리 윌리엄스 매도 조건 확인
 
-        조건: 매수 조건(3가지)이 더 이상 충족되지 않을 때 매도
-              매수 조건이 계속 유지되는 동안은 포지션 보유 유지
+        조건: 돌파기준선이 5봉 평균 이하로 내려가면 매도 (조건 2 미충족)
+              인트라데이 방식에서는 조건 1은 다음 봉 진입 시 사용하므로 매도에는 제외
 
         Args:
             candles: 캔들 데이터 리스트
@@ -177,30 +177,25 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "아직 매수 캔들 마감 안됨"
             }
 
-        # 현재 캔들 기준으로 매수 조건 재평가 (거래량 조건 제외)
-        buy_signal = self.check_buy_signal(candles)
-        conditions = buy_signal.get("conditions", {})
+        # 인트라데이 감시 조건 재평가 (조건 2: above_avg 만 확인)
+        watch_info = self.get_intraday_watch_price(candles)
+        above_avg = watch_info["conditions"].get("above_avg", False)
 
-        # 매도 판단에서 거래량 조건(volume_increase)은 제외
-        # 조건 1(breakthrough) + 조건 2(above_avg) 중 하나라도 미충족 시 매도
-        hold_conditions = {
-            k: v for k, v in conditions.items() if k != "volume_increase"
-        }
-        should_hold = all(hold_conditions.values()) if hold_conditions else False
-
-        if should_hold:
-            # 핵심 조건 유지 → 포지션 보유 계속
-            self.logger.info("📊 매수 조건 유지 중 - 포지션 보유 계속")
+        if above_avg:
+            # 조건 2 유지 → 포지션 보유 계속
+            self.logger.info(
+                f"📊 매수 조건 유지 중 - 포지션 보유 계속 "
+                f"(돌파기준선={watch_info['breakthrough_price']:.2f} > 5봉평균={watch_info['avg_close']:.2f})"
+            )
             return {
                 "should_sell": False,
                 "sell_price": 0.0,
                 "reason": "매수 조건 유지 중"
             }
         else:
-            # 핵심 조건 미충족 → 매도 (거래량 조건 제외한 실패 사유)
-            sell_price = current_candle["open"]
-            failed_reasons = [r for r in buy_signal.get("reasons", []) if "거래량" not in r]
-            reason_str = ", ".join(failed_reasons) if failed_reasons else "매수 조건 미충족"
+            # 조건 2 미충족 → 매도 (다음 봉 시가 기준)
+            sell_price = current_candle["close"]
+            reason_str = f"돌파기준선({watch_info['breakthrough_price']:.2f}) <= 5봉평균({watch_info['avg_close']:.2f})"
             self.logger.info(f"📤 매도 신호 발생! 사유: {reason_str}, 매도 가격: {sell_price:.2f}")
             return {
                 "should_sell": True,
@@ -208,11 +203,73 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": reason_str
             }
 
+    def get_intraday_watch_price(self, closed_candles: List[Dict]) -> Dict:
+        """
+        인트라데이 감시용 돌파 기준선 및 사전 조건 확인
+
+        캔들 마감 시 호출 → 다음 봉 형성 기간 동안 감시할 기준선 반환
+
+        조건 평가 기준 (이전 마감 봉):
+          - 조건 2: 돌파기준선 > 최근 5봉 종가 평균 (마감 봉 기준)
+          - 조건 3: 직전 마감 봉 거래량 > 그 이전 봉 거래량 (마감 봉 기준)
+
+        Returns:
+            {
+                "should_watch": bool,
+                "breakthrough_price": float,
+                "avg_close": float,
+                "conditions": {"above_avg": bool, "volume_increase": bool}
+            }
+        """
+        if len(closed_candles) < self.num_candles_for_avg + 1:
+            return {
+                "should_watch": False,
+                "breakthrough_price": 0.0,
+                "avg_close": 0.0,
+                "conditions": {"above_avg": False, "volume_increase": False}
+            }
+
+        current_candle = closed_candles[-1]
+        prev_candle = closed_candles[-2]
+        last_n_candles = closed_candles[-(self.num_candles_for_avg + 1):-1]
+
+        # 돌파기준선 계산
+        breakthrough_price = self._calculate_breakthrough_price(prev_candle, current_candle)
+
+        # 조건 2: 돌파기준선 > 최근 5봉 종가 평균
+        avg_close = sum(c["close"] for c in last_n_candles) / len(last_n_candles)
+        condition2 = breakthrough_price > avg_close
+
+        # 조건 3: 이전봉 거래량 < 현재봉 거래량
+        condition3 = prev_candle["volume"] < current_candle["volume"]
+
+        should_watch = condition2 and condition3
+
+        if should_watch:
+            self.logger.info(
+                f"👁 인트라데이 감시 시작: 돌파기준선={breakthrough_price:.2f}, "
+                f"5봉평균={avg_close:.2f}"
+            )
+        else:
+            self.logger.debug(
+                f"👁 인트라데이 감시 미설정: above_avg={condition2}, volume_inc={condition3}"
+            )
+
+        return {
+            "should_watch": should_watch,
+            "breakthrough_price": breakthrough_price,
+            "avg_close": avg_close,
+            "conditions": {
+                "above_avg": condition2,
+                "volume_increase": condition3
+            }
+        }
+
     def _calculate_breakthrough_price(self, prev_candle: Dict, current_candle: Dict) -> float:
         """
         돌파 기준선 가격 계산
 
-        돌파 기준선 = 현재봉 시가 + (전봉 고가 - 전봉 저가) × 배율
+        돌파 기준선 = 현재봉 종가 + (현재봉 고가 - 현재봉 저가) × 배율
 
         Args:
             prev_candle: 이전 캔들
@@ -221,8 +278,8 @@ class LarryWilliamsStrategy(StrategyEngine):
         Returns:
             돌파 기준선 가격
         """
-        prev_range = prev_candle["high"] - prev_candle["low"]
-        breakthrough_price = current_candle["open"] + prev_range * self.breakthrough_ratio
+        current_range = current_candle["high"] - current_candle["low"]
+        breakthrough_price = current_candle["close"] + current_range * self.breakthrough_ratio
         return breakthrough_price
 
     def calculate_expected_profit(self, buy_price: float, sell_price: float) -> Dict:

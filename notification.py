@@ -124,6 +124,80 @@ class TelegramNotifier:
 
         return self._send_message(message)
 
+    def send_limit_order_placed(
+        self,
+        currency: str,
+        amount: float,
+        price: float,
+        breakthrough_price: Optional[float] = None,
+        avg_close: Optional[float] = None
+    ) -> bool:
+        """
+        지정가 매수 주문 접수 알림
+
+        Args:
+            currency: 코인 심볼
+            amount: 주문 수량
+            price: 지정가
+            breakthrough_price: 돌파 기준선 가격
+            avg_close: 5봉 종가 평균
+
+        Returns:
+            전송 성공 여부
+        """
+        message = f"""📋 지정가 매수 주문 접수
+
+💰 코인: {currency}
+🎯 주문 가격: {price:,.2f} KRW
+📊 주문 수량: {amount:.4f}
+💵 주문 금액: {amount * price:,.0f} KRW
+⏰ 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        if breakthrough_price is not None:
+            message += f"\n\n🎯 돌파 기준선: {breakthrough_price:,.2f} KRW"
+        if avg_close is not None:
+            message += f"\n📊 5봉 종가 평균: {avg_close:,.2f} KRW"
+
+        message += "\n\n⏳ 체결 대기 중..."
+
+        return self._send_message(message)
+
+    def send_buy_filled(
+        self,
+        currency: str,
+        amount: float,
+        price: float,
+        breakthrough_price: Optional[float] = None,
+        avg_close: Optional[float] = None
+    ) -> bool:
+        """
+        지정가 매수 체결 완료 알림
+
+        Args:
+            currency: 코인 심볼
+            amount: 체결 수량
+            price: 체결 가격
+            breakthrough_price: 돌파 기준선 가격
+            avg_close: 5봉 종가 평균
+
+        Returns:
+            전송 성공 여부
+        """
+        message = f"""✅ 매수 체결 완료
+
+💰 코인: {currency}
+📥 체결 가격: {price:,.2f} KRW
+📊 체결 수량: {amount:.4f}
+💵 체결 금액: {amount * price:,.0f} KRW
+⏰ 체결 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        if breakthrough_price is not None:
+            message += f"\n\n🎯 돌파 기준선: {breakthrough_price:,.2f} KRW"
+        if avg_close is not None:
+            message += f"\n📊 5봉 종가 평균: {avg_close:,.2f} KRW"
+
+        return self._send_message(message)
+
     def send_sell_signal(
         self,
         currency: str,
@@ -395,6 +469,63 @@ class TelegramNotifier:
             f"현재가: {current_price:,.0f} KRW | 수익률: {profit_percent:+.2f}%\n"
             f"다음 정규 캔들: {next_time}"
         )
+        return self._send_message(message)
+
+    def send_intraday_watch_started(
+        self,
+        currency: str,
+        breakthrough_price: float,
+        avg_close: float,
+        period_end_time: str
+    ) -> bool:
+        """
+        인트라데이 감시 시작 알림
+
+        Args:
+            currency: 코인 심볼
+            breakthrough_price: 돌파 기준선 가격
+            avg_close: 5봉 종가 평균
+            period_end_time: 감시 만료 시각 (HH:MM)
+
+        Returns:
+            전송 성공 여부
+        """
+        message = f"""👁 인트라데이 감시 시작
+
+💰 코인: {currency}
+🎯 돌파 기준선: {breakthrough_price:,.2f} KRW
+📊 5봉 종가 평균: {avg_close:,.2f} KRW
+⏰ 감시 만료: {period_end_time} KST
+🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+현재가가 돌파 기준선 도달 시 즉시 지정가 매수합니다."""
+
+        return self._send_message(message)
+
+    def send_intraday_watch_expired(
+        self,
+        currency: str,
+        breakthrough_price: float
+    ) -> bool:
+        """
+        인트라데이 감시 만료 알림 (돌파 없이 봉 마감)
+
+        Args:
+            currency: 코인 심볼
+            breakthrough_price: 감시 중이던 돌파 기준선 가격
+
+        Returns:
+            전송 성공 여부
+        """
+        message = f"""⏰ 인트라데이 감시 만료
+
+💰 코인: {currency}
+🎯 감시 기준선: {breakthrough_price:,.2f} KRW
+🕐 만료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+돌파 없이 봉이 마감되었습니다.
+다음 봉 마감 시 새 기준선을 설정합니다."""
+
         return self._send_message(message)
 
     def send_daily_report(

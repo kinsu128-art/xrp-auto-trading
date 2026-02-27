@@ -150,6 +150,80 @@ class OrderExecutor:
                     self.logger.error(f"❌ 시장가 매도 최종 실패: {str(e)}")
                     raise OrderExecutionError(f"시장가 매도 실패: {str(e)}")
 
+    def limit_buy(
+        self,
+        order_currency: str = "XRP",
+        payment_currency: str = "KRW",
+        price: float = 0.0,
+        units: float = 0.0
+    ) -> Dict:
+        """
+        지정가 매수
+
+        Args:
+            order_currency: 주문 통화
+            payment_currency: 결제 통화
+            price: 지정가 (KRW)
+            units: 매수 수량
+
+        Returns:
+            주문 결과 딕셔너리
+
+        Raises:
+            OrderExecutionError: 주문 실행 실패 시
+        """
+        for attempt in range(self.max_retries):
+            try:
+                self.logger.info(f"📥 지정가 매수 주문... ({units:.4f} {order_currency} @ {price:,.2f} KRW)")
+                result = self.api.limit_buy(
+                    order_currency=order_currency,
+                    payment_currency=payment_currency,
+                    price=price,
+                    volume=units
+                )
+                self.logger.info(f"✅ 지정가 매수 주문 접수: {result}")
+                return result
+
+            except BithumbAPIError as e:
+                if attempt < self.max_retries - 1:
+                    self.logger.warning(
+                        f"⚠️  지정가 매수 실패 (시도 {attempt + 1}/{self.max_retries}): {str(e)}"
+                    )
+                    time.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    self.logger.error(f"❌ 지정가 매수 최종 실패: {str(e)}")
+                    raise OrderExecutionError(f"지정가 매수 실패: {str(e)}")
+
+    def cancel_order(self, order_id: str) -> Dict:
+        """
+        주문 취소
+
+        Args:
+            order_id: 주문 UUID
+
+        Returns:
+            취소 결과 딕셔너리
+
+        Raises:
+            OrderExecutionError: 취소 실패 시
+        """
+        for attempt in range(self.max_retries):
+            try:
+                self.logger.info(f"🚫 주문 취소 시도... ({order_id[:8]}...)")
+                result = self.api.cancel_order(order_id)
+                self.logger.info(f"✅ 주문 취소 완료: {result}")
+                return result
+
+            except BithumbAPIError as e:
+                if attempt < self.max_retries - 1:
+                    self.logger.warning(
+                        f"⚠️  주문 취소 실패 (시도 {attempt + 1}/{self.max_retries}): {str(e)}"
+                    )
+                    time.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    self.logger.error(f"❌ 주문 취소 최종 실패: {str(e)}")
+                    raise OrderExecutionError(f"주문 취소 실패: {str(e)}")
+
     def get_balance(self, currency: Optional[str] = None) -> Dict:
         """
         잔고 조회
