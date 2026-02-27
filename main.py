@@ -1158,7 +1158,10 @@ class TradingBot:
         try:
             current = candles[-1]
             prev = candles[-2]
-            ts = datetime.fromtimestamp(current["timestamp"] / 1000)
+            # 캔들 timestamp = 시작 시간 → 마감 시간은 시작 + 인터벌
+            interval_ms = self._parse_candle_interval_hours() * 3600 * 1000
+            close_ts = (current["timestamp"] + interval_ms) / 1000
+            ts = datetime.fromtimestamp(close_ts)
 
             conditions = watch_info.get("conditions", {})
             bp = watch_info.get("breakthrough_price", 0)
@@ -1197,7 +1200,10 @@ class TradingBot:
         try:
             current = candles[-1]
             prev = candles[-2]
-            ts = datetime.fromtimestamp(current["timestamp"] / 1000)
+            # 캔들 timestamp = 시작 시간 → 마감 시간은 시작 + 인터벌
+            interval_ms = self._parse_candle_interval_hours() * 3600 * 1000
+            close_ts = (current["timestamp"] + interval_ms) / 1000
+            ts = datetime.fromtimestamp(close_ts)
 
             conditions = buy_signal.get("conditions", {})
             bp = buy_signal.get("breakthrough_price", 0)
@@ -1294,7 +1300,9 @@ class TradingBot:
         # 마지막 캔들
         latest_candle = self.storage.get_latest_candle()
         if latest_candle:
-            candle_time = datetime.fromtimestamp(latest_candle["timestamp"] / 1000)
+            interval_ms = self._parse_candle_interval_hours() * 3600 * 1000
+            close_ts = (latest_candle["timestamp"] + interval_ms) / 1000
+            candle_time = datetime.fromtimestamp(close_ts)
             candle_str = candle_time.strftime('%m/%d %H:%M')
             candle_close = f"{latest_candle['close']:,.2f} KRW"
         else:
