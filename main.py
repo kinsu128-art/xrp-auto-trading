@@ -150,6 +150,16 @@ class TradingBot:
             self.logger.info("먼저 'python main.py --mode collect'를 실행하세요.")
             return False
 
+        # 잔고 초기화
+        try:
+            balance = self.order_executor.get_balance()
+            krw = float(balance.get(f"available_{self.config.TRADING_CURRENCY.lower()}", 0))
+            coin = float(balance.get(f"available_{self.config.ORDER_CURRENCY.lower()}", 0))
+            self.portfolio.update_balance(krw, coin)
+            self.logger.info(f"💵 초기 잔고: KRW={krw:,.0f}, {self.config.ORDER_CURRENCY}={coin:.4f}")
+        except Exception as e:
+            self.logger.warning(f"초기 잔고 조회 실패 (계속 진행): {e}")
+
         # 텔레그램 연결 테스트
         if not self.notifier.test_connection():
             self.logger.error("텔레그램 연결 실패")
