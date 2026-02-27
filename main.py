@@ -9,7 +9,10 @@ import logging
 import schedule
 import argparse
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# 한국 표준시 (UTC+9) - 시스템 타임존에 무관하게 KST 사용
+KST = timezone(timedelta(hours=9))
 from typing import Optional
 
 # Windows 콘솔 UTF-8 설정
@@ -312,7 +315,7 @@ class TradingBot:
 
         try:
             self.logger.info("=" * 50)
-            self.logger.info(f"🕐 캔들 마감 처리 시작: {datetime.now()}")
+            self.logger.info(f"🕐 캔들 마감 처리 시작: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}")
 
             # 1. 데이터 업데이트
             self.logger.info("1️⃣ 데이터 업데이트 중...")
@@ -325,7 +328,7 @@ class TradingBot:
 
             if updated_count == 0:
                 # 다음 캔들 시간 계산 (CANDLE_PERIOD 기반 동적 생성)
-                _now = datetime.now()
+                _now = datetime.now(KST)
                 _interval_hours = self._parse_candle_interval_hours()
                 _candle_hours = list(range(0, 24, _interval_hours))
                 _next_hour = next((h for h in _candle_hours if h > _now.hour), None)
@@ -687,7 +690,7 @@ class TradingBot:
                 f"[주문 취소]\n"
                 f"지정가 매수 주문이 체결되지 않아 취소되었습니다.\n"
                 f"주문 ID: {order_id[:8]}...\n"
-                f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"🕐 {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"
             )
         except Exception as e:
             self.logger.error(f"주문 취소 실패: {e}")
@@ -1291,7 +1294,7 @@ class TradingBot:
             f"🕯️ 마지막 캔들: {candle_str}\n"
             f"💰 종가: {candle_close}\n\n"
             f"⚙️ 전략: 래리 윌리엄스 ({self.config.BREAKTHROUGH_RATIO}x)\n"
-            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"🕐 {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
     def _cmd_help(self) -> str:
@@ -1331,7 +1334,7 @@ class TradingBot:
                 f" ({coin_value:,.0f} KRW)\n\n"
                 f"📊 총 자산: {total:,.0f} KRW\n"
                 f"💰 {self.config.ORDER_CURRENCY} 현재가: {current_price:,.2f} KRW\n\n"
-                f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"🕐 {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"
             )
         except Exception as e:
             self.logger.error(f"잔고 조회 실패: {e}")

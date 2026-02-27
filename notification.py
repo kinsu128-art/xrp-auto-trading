@@ -6,7 +6,10 @@ import threading
 import time
 import requests
 from typing import Optional, Dict, Callable
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# 한국 표준시 (UTC+9) - 시스템 타임존에 무관하게 KST 사용
+KST = timezone(timedelta(hours=9))
 
 
 class TelegramNotifier:
@@ -115,7 +118,7 @@ class TelegramNotifier:
 📈 매수 가격: {price:.2f} KRW
 📊 매수 수량: {amount:.8f}
 💵 주문 금액: {amount * price:,.0f} KRW
-⏰ 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+⏰ 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         if breakthrough_price is not None:
             message += f"\n\n🎯 돌파 기준선: {breakthrough_price:.2f} KRW"
@@ -151,7 +154,7 @@ class TelegramNotifier:
 🎯 주문 가격: {price:,.2f} KRW
 📊 주문 수량: {amount:.4f}
 💵 주문 금액: {amount * price:,.0f} KRW
-⏰ 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+⏰ 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         if breakthrough_price is not None:
             message += f"\n\n🎯 돌파 기준선: {breakthrough_price:,.2f} KRW"
@@ -189,7 +192,7 @@ class TelegramNotifier:
 📥 체결 가격: {price:,.2f} KRW
 📊 체결 수량: {amount:.4f}
 💵 체결 금액: {amount * price:,.0f} KRW
-⏰ 체결 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+⏰ 체결 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         if breakthrough_price is not None:
             message += f"\n\n🎯 돌파 기준선: {breakthrough_price:,.2f} KRW"
@@ -234,7 +237,7 @@ class TelegramNotifier:
 💵 회수 금액: {amount * price:,.0f} KRW
 {'✅' if profit_color else '❌'} 수익: {profit:+,.0f} KRW ({profit_percent:+.2f}%)
 ⏰ 보유 시간: {duration_hours:.1f}시간
-🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         if reason:
             message += f"\n\n📋 매도 사유: {reason}"
@@ -274,7 +277,7 @@ class TelegramNotifier:
 📊 보유 수량: {amount:.8f}
 {profit_emoji} 미실현 손익: {unrealized_profit:+,.0f} KRW ({unrealized_percent:+.2f}%)
 ⏰ 보유 시간: {duration_hours:.1f}시간
-🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         return self._send_message(message)
 
@@ -308,7 +311,7 @@ class TelegramNotifier:
             message += f"\n\n💰 {coin_symbol} 가치: {coin_value:,.0f} KRW"
             message += f"\n📊 총 자산: {total_value:,.0f} KRW (약 {coin_price:.2f} KRW/{coin_symbol})"
 
-        message += f"\n\n🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        message += f"\n\n🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"
 
         return self._send_message(message)
 
@@ -333,7 +336,7 @@ class TelegramNotifier:
 
 ❌ 에러 타입: {error_type}
 📝 에러 메시지: {error_message}
-🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         if context:
             message += "\n\n추가 정보:"
@@ -369,7 +372,7 @@ class TelegramNotifier:
 📉 최대 손실률: {metrics['max_drawdown_percent']:.2f}%
 📊 샤프 비율: {metrics['sharpe_ratio']:.2f}
 
-🕐 생성 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+🕐 생성 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         return self._send_message(message)
 
@@ -398,7 +401,7 @@ class TelegramNotifier:
         message = f"""{status_emoji} 시스템 상태
 
 {status.upper()}: {message}
-🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         return self._send_message(message)
 
@@ -420,7 +423,7 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
 
         if is_retry:
             title = "⚠️ 캔들 데이터 재시도 실패"
@@ -460,7 +463,7 @@ class TelegramNotifier:
         Returns:
             전송 성공 여부
         """
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now_str = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
         emoji = "🔴" if "매도" in action else "🟢"
         message = (
             f"📊 캔들 수집 실패 - 폴백 판단 실행\n"
@@ -496,7 +499,7 @@ class TelegramNotifier:
 🎯 돌파 기준선: {breakthrough_price:,.2f} KRW
 📊 5봉 종가 평균: {avg_close:,.2f} KRW
 ⏰ 감시 만료: {period_end_time} KST
-🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}
 
 현재가가 돌파 기준선 도달 시 즉시 지정가 매수합니다."""
 
@@ -521,7 +524,7 @@ class TelegramNotifier:
 
 💰 코인: {currency}
 🎯 감시 기준선: {breakthrough_price:,.2f} KRW
-🕐 만료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+🕐 만료 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}
 
 돌파 없이 봉이 마감되었습니다.
 다음 봉 마감 시 새 기준선을 설정합니다."""
@@ -549,7 +552,7 @@ class TelegramNotifier:
 
 💵 총 수익: {total_pnl:+,.0f} KRW ({total_pnl_percent:+.2f}%)
 🔄 거래 횟수: {len(trades)}회
-🕐 기간: {datetime.now().strftime('%Y-%m-%d')}"""
+🕐 기간: {datetime.now(KST).strftime('%Y-%m-%d')}"""
 
         if trades:
             message += "\n\n거래 내역:"
@@ -571,7 +574,7 @@ class TelegramNotifier:
 
 XRP 자동매매 시스템이 성공적으로 텔레그램에 연결되었습니다.
 
-🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
         return self._send_message(message)
 
