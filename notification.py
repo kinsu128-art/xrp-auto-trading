@@ -501,7 +501,7 @@ class TelegramNotifier:
 ⏰ 감시 만료: {period_end_time} KST
 🕐 시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}
 
-현재가가 돌파 기준선 도달 시 즉시 지정가 매수합니다."""
+현재가가 돌파 기준선 도달 시 즉시 시장가 매수합니다."""
 
         return self._send_message(message)
 
