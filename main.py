@@ -1084,23 +1084,30 @@ class TradingBot:
             current_price: 돌파 감지 시점의 현재가
             breakthrough_price: 돌파 기준선 가격 (매수 트리거 기준)
         """
-        # KRW 잔고 확인
+        # KRW 잔고 확인 (수수료 고려하여 주문 금액 산정)
         krw_balance = self.portfolio.krw_balance
         if krw_balance <= 0:
             self.logger.warning("KRW 잔고 없음 - 인트라데이 시장가 매수 불가")
             return
 
+        # 수수료를 고려한 실제 주문 금액: 잔고 / (1 + 수수료율)
+        # 빗썸 시장가 매수 시 잔고에서 주문금액 + 수수료가 차감됨
+        buy_amount_krw = int(krw_balance / (1 + self.config.FEE_RATE)) - 1
+        if buy_amount_krw < self.portfolio.min_order_krw:
+            self.logger.warning(f"주문 금액 부족: {buy_amount_krw:,.0f} < {self.portfolio.min_order_krw:,.0f}")
+            return
+
         # 시장가 매수 실행
         try:
             self.logger.info(
-                f"📥 인트라데이 시장가 매수: {krw_balance:,.0f} KRW "
+                f"📥 인트라데이 시장가 매수: {buy_amount_krw:,.0f} KRW (잔고: {krw_balance:,.0f}) "
                 f"(돌파기준선={breakthrough_price:,.2f}, 현재가={current_price:,.2f})"
             )
 
             result = self.order_executor.market_buy(
                 order_currency=self.config.ORDER_CURRENCY,
                 payment_currency=self.config.TRADING_CURRENCY,
-                amount_krw=krw_balance
+                amount_krw=buy_amount_krw
             )
 
             # 실제 체결 수량/가격 조회
