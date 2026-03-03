@@ -118,7 +118,7 @@ class Backtester:
         self,
         strategy: StrategyEngine,
         initial_capital: float = 1000000.0,
-        fee_rate: float = 0.0015,  # 0.15% 수수료
+        fee_rate: float = 0.0025,  # 0.25% 수수료 (빗썸 기본)
         logger: Optional[logging.Logger] = None
     ):
         """
@@ -155,7 +155,7 @@ class Backtester:
         current_drawdown = 0.0
         current_drawdown_duration = 0
 
-        # 수수료 계산 (0.15% 매수/매도 각각)
+        # 수수료율 (매수/매도 각각 적용)
         buy_fee_rate = self.fee_rate
         sell_fee_rate = self.fee_rate
 
@@ -179,8 +179,9 @@ class Backtester:
                     # 다음 봉에서 돌파기준선 도달 여부 (고가 기준)
                     if next_candle["high"] >= breakthrough_price:
                         buy_price = breakthrough_price
-                        buy_fee = capital * buy_fee_rate
-                        buy_amount = (capital - buy_fee) / buy_price
+                        # 빗썸 시장가 매수: 주문금액 + 수수료 = 잔고
+                        buy_amount_krw = capital / (1 + buy_fee_rate)
+                        buy_amount = buy_amount_krw / buy_price
 
                         position = {
                             "entry_price": buy_price,
@@ -306,18 +307,3 @@ class Backtester:
         self.logger.info(f"  총 거래: {metrics['total_trades']} (승: {metrics['winning_trades']}, 패: {metrics['losing_trades']})")
 
         return result
-
-    def _calculate_fee(self, amount: float, price: float, is_buy: bool) -> float:
-        """
-        수수료 계산
-
-        Args:
-            amount: 거래 수량
-            price: 가격
-            is_buy: 매수 여부
-
-        Returns:
-            수수료 (KRW)
-        """
-        total_value = amount * price
-        return total_value * self.fee_rate

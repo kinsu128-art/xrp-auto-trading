@@ -60,21 +60,6 @@ def format_percent(value: float, decimals: int = 2) -> str:
     return f"{value:+.{decimals}f}%"
 
 
-def calculate_fee(amount: float, price: float, fee_rate: float) -> float:
-    """
-    수수료 계산
-
-    Args:
-        amount: 수량
-        price: 가격
-        fee_rate: 수수료율
-
-    Returns:
-        수수료
-    """
-    total_value = amount * price
-    return total_value * fee_rate
-
 
 def validate_positive_number(value: Any, name: str = "값") -> bool:
     """
