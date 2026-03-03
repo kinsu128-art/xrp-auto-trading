@@ -720,8 +720,9 @@ class TradingBot:
         if sell_signal["should_sell"]:
             self.logger.info("✅ 매도 신호 발생!")
 
-            # 매도 수량
-            amount = position["amount"]
+            # 매도 수량: 실제 코인 잔고 사용 (포지션 수량과 잔고 차이 방지)
+            coin_balance = self.portfolio.coin_balance
+            amount = min(position["amount"], coin_balance) if coin_balance > 0 else position["amount"]
 
             # 매도 실행
             try:
