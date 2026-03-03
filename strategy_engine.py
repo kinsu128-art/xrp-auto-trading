@@ -137,7 +137,7 @@ class LarryWilliamsStrategy(StrategyEngine):
         """
         래리 윌리엄스 매도 조건 확인
 
-        조건: 돌파기준선이 5봉 평균 이하로 내려가면 매도 (조건 2 미충족)
+        조건: 마감캔들 종가가 5봉 평균 미만이면 매도
               인트라데이 방식에서는 조건 1은 다음 봉 진입 시 사용하므로 매도에는 제외
 
         Args:
@@ -177,15 +177,17 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "아직 매수 캔들 마감 안됨"
             }
 
-        # 인트라데이 감시 조건 재평가 (조건 2: above_avg 만 확인)
+        # 5봉 평균 계산 (현재 마감봉 직전 5개 종가 평균)
         watch_info = self.get_intraday_watch_price(candles)
-        above_avg = watch_info["conditions"].get("above_avg", False)
+        avg_close = watch_info["avg_close"]
+        close_price = current_candle["close"]
+        close_above_avg = close_price >= avg_close
 
-        if above_avg:
-            # 조건 2 유지 → 포지션 보유 계속
+        if close_above_avg:
+            # 마감 종가 >= 5봉 평균 → 포지션 보유 계속
             self.logger.info(
                 f"📊 매수 조건 유지 중 - 포지션 보유 계속 "
-                f"(돌파기준선={watch_info['breakthrough_price']:.2f} > 5봉평균={watch_info['avg_close']:.2f})"
+                f"(종가={close_price:.2f} >= 5봉평균={avg_close:.2f})"
             )
             return {
                 "should_sell": False,
@@ -193,9 +195,9 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "reason": "매수 조건 유지 중"
             }
         else:
-            # 조건 2 미충족 → 매도 (현재 마감봉 종가 기준 시장가 매도)
-            sell_price = current_candle["close"]
-            reason_str = f"돌파기준선({watch_info['breakthrough_price']:.2f}) <= 5봉평균({watch_info['avg_close']:.2f})"
+            # 마감 종가 < 5봉 평균 → 매도 (현재 마감봉 종가 기준 시장가 매도)
+            sell_price = close_price
+            reason_str = f"종가({close_price:.2f}) < 5봉평균({avg_close:.2f})"
             self.logger.info(f"📤 매도 신호 발생! 사유: {reason_str}, 매도 가격: {sell_price:.2f}")
             return {
                 "should_sell": True,
@@ -358,8 +360,7 @@ class LarryWilliamsStrategy(StrategyEngine):
                 "전봉 거래량 < 현재봉 거래량"
             ],
             "sell_conditions": [
-                "조건2 미충족 시 매도 (돌파기준선 <= 5봉 평균)",
-                "조건3(거래량)은 매도 판단에서 제외",
-                "조건2 유지 중이면 포지션 보유 계속"
+                f"마감캔들 종가 < 최근 {self.num_candles_for_avg}봉 종가 평균 시 매도",
+                "마감캔들 종가 >= 5봉 평균이면 포지션 보유 계속"
             ]
         }
